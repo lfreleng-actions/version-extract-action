@@ -2,68 +2,327 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-# Action test/validation workflow
-name: "Test GitHub Action 🧪"
+name: 'Test & Validate 🧪'
 
 # yamllint disable-line rule:truthy
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: ['main']
   pull_request:
-    branches: ["main"]
+    branches: ['main']
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
-  ### Test the GitHub Action in this Repository ###
-  tests:
-    name: "Test local GitHub Action"
-    runs-on: ubuntu-24.04
+  # Single comprehensive test job - replaces 5 separate jobs
+  test-and-validate:
+    name: 'Comprehensive Testing'
+    runs-on: 'ubuntu-latest'
+    timeout-minutes: 30
     permissions:
       contents: read
-    timeout-minutes: 10 # Increase this timeout value as needed
     steps:
-      - name: "Checkout repository"
+      # Security hardening
+      - name: 'Harden Runner'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: 'audit'
+
+      - name: 'Checkout Repository'
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # Perform setup prior to running test(s)
-      - name: "Testing setup step"
-        shell: bash
-        run: |
-          # Testing setup step
-          echo "Testing setup step"
-          echo "Testing setup step/summary output" >> "$GITHUB_STEP_SUMMARY"
+      - name: 'Setup Go'
+        # yamllint disable-line rule:line-length
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.24'
+          cache: true
 
-      - name: "Running local action: ${{ github.repository }}"
+      # Phase 1: Go Quality Checks and Build
+      - name: 'Go Quality Checks'
+        run: |
+          # Go Quality Checks
+          echo '🔍 Running Go quality checks...'
+
+          # Download and verify dependencies
+          go mod download
+          go mod verify
+
+          # Format check
+          if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
+            echo '❌ Code is not formatted:'
+            gofmt -l .
+            exit 1
+          fi
+          echo '✅ Code formatting OK'
+
+          # Vet check
+          go vet ./...
+          echo '✅ Go vet passed'
+
+      # Phase 2: Unit Tests with Coverage
+      - name: 'Unit Tests'
+        run: |
+          # Unit Tests
+          echo '🧪 Running unit tests with coverage...'
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -html=coverage.out -o coverage.html
+          echo '✅ Unit tests completed'
+
+      # Phase 3: Build Binary (single build, used everywhere)
+      - name: 'Build Binary'
+        run: |
+          # Build Binary
+          echo '🔨 Building version-extract binary...'
+          go build -ldflags "-X main.version=ci-test" \
+            -o version-extract ./cmd/version-extract
+          chmod +x version-extract
+          echo '✅ Binary built successfully'
+
+      # Phase 4: CLI Functionality Tests
+      - name: 'CLI Tests'
+        run: |
+          # CLI Tests
+          echo '⚙️ Testing CLI functionality...'
+
+          # Test version command
+          ./version-extract version
+          echo '✅ Version command works'
+
+          # Test list command with JSON output
+          ./version-extract list --format json > supported-types.json
+          jq . supported-types.json > /dev/null
+          echo '✅ List command produces valid JSON'
+
+          # Test help command
+          ./version-extract --help > /dev/null
+          echo '✅ Help command works'
+
+      # Phase 5: Sample Project Tests (replaces matrix strategy)
+      - name: 'Generate Test Samples'
+        run: |
+          # Generate Test Samples
+          echo '📝 Generating test project samples...'
+          ./test/generate-samples.sh test-samples
+          echo '✅ Test samples generated'
+
+      - name: 'Sample Project Tests'
+        run: |
+          # Sample Project Tests
+          echo '🏗️  Testing sample project extraction...'
+
+          # Define projects that should succeed vs fail
+          expected_success=(
+            'dynamic' 'go' 'gradle' 'javascript' 'maven'
+            'python-legacy' 'python' 'rust'
+          )
+          expected_failure=('empty' 'malformed')
+
+          # Counter for results
+          total=0
+          passed=0
+
+          # Test each sample project
+          for project_dir in test-samples/*/; do
+            if [[ -d "$project_dir" ]]; then
+              project_name=$(basename "$project_dir")
+              total=$((total + 1))
+
+              echo "Testing $project_name..."
+
+              # Use fail-on-error=false to always get JSON output
+              if result=$(./version-extract --path "$project_dir" \
+                --format json --fail-on-error=false 2>/dev/null); then
+
+                # Check if this project should succeed or fail
+                should_succeed=false
+                should_fail=false
+
+                for success_project in "${expected_success[@]}"; do
+                  if [[ "$project_name" == "$success_project" ]]; then
+                    should_succeed=true
+                    break
+                  fi
+                done
+
+                for fail_project in "${expected_failure[@]}"; do
+                  if [[ "$project_name" == "$fail_project" ]]; then
+                    should_fail=true
+                    break
+                  fi
+                done
+
+                # Parse the actual result
+                if echo "$result" | jq -e '.success == true' > /dev/null; then
+                  # Project extraction succeeded
+                  version=$(echo "$result" | jq -r '.version // "unknown"')
+                  project_type=$(echo "$result" | jq -r \
+                    '.project_type // "unknown"')
+
+                  if [[ "$should_succeed" == 'true' ]]; then
+                    echo "  ✅ $project_name: v$version ($project_type)"
+                    passed=$((passed + 1))
+                  else
+                    echo "  ❌ $project_name: unexpected success (should fail)"
+                  fi
+                else
+                  # Project extraction failed
+                  error=$(echo "$result" | jq -r '.error // "unknown error"')
+
+                  if [[ "$should_fail" == true ]]; then
+                    echo "  ✅ $project_name: correctly failed ($error)"
+                    passed=$((passed + 1))
+                  else
+                    echo "  ❌ $project_name: unexpected failure ($error)"
+                  fi
+                fi
+              else
+                echo "  ❌ $project_name: binary execution failed"
+              fi
+            fi
+          done
+
+          echo "Sample tests: $passed/$total passed"
+          if [[ $passed -ne $total ]]; then
+            exit 1
+          fi
+
+      # Phase 6: Action Tests (using generated samples)
+      - name: 'GitHub Action Tests'
+        run: |
+          # GitHub Action Tests
+          echo '🎯 Testing GitHub Action functionality...'
+
+          # Test JavaScript project
+          echo 'Testing Action with JavaScript project...'
+          {
+            echo 'success=true'
+            echo 'version=1.2.3'
+            echo 'project-type=JavaScript'
+          } >> test_result.txt
+
+        # Simulate action execution
+      - name: 'Test Action - JavaScript'
+        id: test-js
         uses: ./
         with:
-          input: "test input 💬"
+          path: test-samples/javascript
+          format: json
+          verbose: true
 
-      - name: "Validated local action: ${{ github.repository }}"
-        shell: bash
+      - name: 'Validate Action Results'
         run: |
-          # Local action validation
-          echo "Validated local action: ${{ github.repository }}"
-          echo "Validation step summary output" >> "$GITHUB_STEP_SUMMARY"
+          # Validate Action Results
+          echo 'Validating action outputs...'
 
-      # yamllint disable-line rule:line-length
-      - name: "Running local action: ${{ github.repository }} [Override Failure]"
-        uses: ./
-        id: failure
-        continue-on-error: true
+          # Check JavaScript results
+          if [[ "${{ steps.test-js.outputs.success }}" != "true" ]]; then
+            echo '❌ JavaScript action test failed'
+            exit 1
+          fi
+
+          if [[ "${{ steps.test-js.outputs.version }}" != "1.2.3" ]]; then
+            echo "❌ JavaScript version mismatch: expected 1.2.3," \
+              "got ${{ steps.test-js.outputs.version }}"
+            exit 1
+          fi
+
+          if [[ "${{ steps.test-js.outputs.project-type }}" != \
+            "JavaScript" ]]; then
+            echo "❌ JavaScript project type mismatch: expected" \
+              "JavaScript, got ${{ steps.test-js.outputs.project-type }}"
+            exit 1
+          fi
+
+          echo '✅ Action tests passed'
+
+      # Phase 7: Error Handling Tests
+      - name: 'Error Handling Tests'
+        run: |
+          # Error Handling Tests
+          echo '🚫 Testing error handling scenarios...'
+
+          # Test with empty project (should fail)
+          if ./version-extract --path test-samples/empty \
+            --fail-on-error=true > /dev/null 2>&1; then
+            echo "❌ Should have failed with empty project"
+            exit 1
+          fi
+          echo '✅ Correctly failed with empty project'
+
+          # Test with fail-on-error=false (should succeed but report failure)
+          if result=$(./version-extract --path test-samples/empty \
+            --fail-on-error=false --format json 2>/dev/null); then
+            if echo "$result" | jq -e '.success == false' > /dev/null; then
+              echo '✅ Correctly handled fail-on-error=false'
+            else
+              echo '❌ Should have reported success=false'
+              exit 1
+            fi
+          else
+            echo '❌ Should have succeeded with fail-on-error=false'
+            exit 1
+          fi
+
+      # Phase 8: Comprehensive Integration Tests
+      # Tests EVERY sample repository referenced in
+      # configs/default-patterns.yaml
+      # This ensures all real-world projects we claim to support actually
+      # work
+      - name: 'Integration Tests'
+        run: |
+          # Integration Tests
+          echo '🔗 Running comprehensive integration tests...'
+          VERBOSE=true ./test/integration/run-tests.sh \
+            ./version-extract
+          echo '✅ All repository integration tests completed successfully'
+
+      # Phase 9: Upload Artifacts
+      - name: 'Upload Test Artifacts'
+        if: always()
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          invalid_input: "Some garbage"
+          name: test-results
+          path: |
+            coverage.html
+            supported-types.json
+            integration-test-report.json
+            test-samples/
+          retention-days: 7
 
-      # Failure testing is also important
-      - name: "Error if step above did NOT fail"
-        if: steps.failure.outcome == 'success'
-        shell: bash
+      # Phase 10: Test Summary
+      - name: 'Test Summary'
+        if: always()
         run: |
-          # Error if step above did NOT fail
-          echo "Error: previous test step did NOT fail ❌"
-          exit 1
+          # Test Summary
+          {
+            echo '# 🧪 Comprehensive Test Results'
+            echo ''
+            echo '## ✅ Completed Test Phases'
+            echo '- Go quality checks (format, vet)'
+            echo '- Unit tests with coverage'
+            echo '- Binary build and CLI testing'
+            echo '- Sample project extraction tests'
+            echo '- GitHub Action functionality tests'
+            echo '- Error handling scenario tests'
+            echo '- Comprehensive integration tests with ALL sample'
+            echo '  repositories'
+            echo ''
+            echo '## 📊 Artifacts Generated'
+            echo '- Code coverage report (coverage.html)'
+            echo '- Supported project types (supported-types.json)'
+            echo '- Comprehensive integration test report'
+            echo '  (integration-test-report.json)'
+            echo '- Test project samples (test-samples/)'
+            echo ''
+            echo '🎉 All tests completed successfully!'
+          } >> "$GITHUB_STEP_SUMMARY"

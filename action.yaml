@@ -2,36 +2,252 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-# actions-template
-name: "🛠️ Actions Template"
-description: "Description of action"
-# Any relevant notes/observations can go here
+name: "🔍 Version Extract Action"
+description: "Extract version strings from various software project types"
+author: "The Linux Foundation"
 
 inputs:
-  input:
-    description: "Description of input"
-    required: true
+  path:
+    description: "Path to search for project files or path to a specific file"
+    required: false
+    default: "."
+  config:
+    description: "Path to custom configuration file"
+    required: false
+    default: ""
+  format:
+    description: "Output format (text or json)"
+    required: false
+    default: "text"
+  verbose:
+    description: "Enable verbose output"
+    required: false
+    default: "false"
+  fail-on-error:
+    description: "Fail the action if version cannot be extracted"
+    required: false
+    default: "true"
+  json_format:
+    description: "JSON output format: pretty, minimised (default: pretty)"
+    required: false
+    default: "pretty"
+  dynamic-fallback:
+    description: "Enable dynamic versioning fallback to Git tags"
+    required: false
+    default: "true"
 
 outputs:
-  output:
-    description: "Description of output"
-    value: ${{ steps.code.outputs.output }}
+  version:
+    description: "Extracted version string"
+    value: ${{ steps.extract.outputs.version }}
+  project-type:
+    description: "Detected project type"
+    value: ${{ steps.extract.outputs.project-type }}
+  subtype:
+    description: "Project subtype (e.g., npm, gradle)"
+    value: ${{ steps.extract.outputs.subtype }}
+  file:
+    description: "File where version was found"
+    value: ${{ steps.extract.outputs.file }}
+  success:
+    description: "Whether version extraction was successful"
+    value: ${{ steps.extract.outputs.success }}
+  matched-by:
+    description: "Regex pattern or method that matched the version"
+    value: ${{ steps.extract.outputs.matched-by }}
+  version-source:
+    description: "Version source type (static or dynamic-git-tag)"
+    value: ${{ steps.extract.outputs.version-source }}
+  git-tag:
+    description: "Original git tag (for dynamic versioning)"
+    value: ${{ steps.extract.outputs.git-tag }}
+  error:
+    description: "Error message (when success=false)"
+    value: ${{ steps.extract.outputs.error }}
 
 runs:
   using: "composite"
   steps:
-    - name: "Friendly Name"
-      id: code
+    - name: "Setup Go"
+      uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32  # v5.0.2
+      with:
+        go-version: "1.24"
+        cache: true
+
+    - name: "Build version extract"
       shell: bash
       run: |
-        # Friendly Name
-        input="${{ inputs.input }}"
-        if [ -z "$input" ]; then
-          echo "Error: mandatory input was not set/configured ❌"
-          exit 1
+        cd "${{ github.action_path }}"
+        echo "Building version extract..."
+        go build -ldflags "-X main.version=action" \
+          -o version-extract cmd/version-extract/main.go
+        chmod +x version-extract
+
+    - name: "Extract project version"
+      id: extract
+      shell: bash
+      run: |
+        cd "${{ github.action_path }}"
+
+        # Set up parameters
+        SEARCH_PATH="${{ inputs.path }}"
+        CONFIG_PATH="${{ inputs.config }}"
+        FORMAT="${{ inputs.format }}"
+        VERBOSE="${{ inputs.verbose }}"
+        FAIL_ON_ERROR="${{ inputs.fail-on-error }}"
+        JSON_FORMAT="${{ inputs.json_format }}"
+        DYNAMIC_FALLBACK="${{ inputs.dynamic-fallback }}"
+
+        # Build command arguments using array
+        ARGS=("--path=${SEARCH_PATH}" "--format=json")
+
+        if [ -n "${CONFIG_PATH}" ]; then
+          ARGS+=("--config=${CONFIG_PATH}")
         fi
 
-        echo "output=$input" >> "$GITHUB_ENV"
-        echo "output=$input" >> "$GITHUB_OUTPUT"
-        echo "Action received: $input ✅"
-        echo "Action received: $input ✅" >> "$GITHUB_STEP_SUMMARY"
+        if [ "${VERBOSE}" = "true" ]; then
+          ARGS+=("--verbose")
+        fi
+
+        if [ "${FAIL_ON_ERROR}" = "false" ]; then
+          ARGS+=("--fail-on-error=false")
+        fi
+
+        if [ "${JSON_FORMAT}" != "pretty" ]; then
+          ARGS+=("--json-format=${JSON_FORMAT}")
+        fi
+
+        if [ "${DYNAMIC_FALLBACK}" = "false" ]; then
+          ARGS+=("--dynamic-fallback=false")
+        fi
+
+        echo "Running: ./version-extract ${ARGS[*]}"
+
+        # Run the extractor and capture output correctly
+        # The Go app sends verbose output to stderr and JSON to stdout
+        # when format=json
+        set +e  # Don't exit on command failure
+        if [ "${VERBOSE}" = "true" ]; then
+          # Verbose mode: show stderr, capture stdout for JSON parsing
+          OUTPUT=$(./version-extract "${ARGS[@]}" 2>&1)
+          EXTRACTOR_EXIT_CODE=$?
+          echo "${OUTPUT}"
+          # Extract JSON from the output (from first { to last })
+          JSON_LINE=$(echo "${OUTPUT}" | sed -n '/^{/,/^}/p')
+        else
+          # Non-verbose mode: suppress stderr, capture stdout
+          OUTPUT=$(./version-extract "${ARGS[@]}" 2>/dev/null)
+          EXTRACTOR_EXIT_CODE=$?
+          JSON_LINE="${OUTPUT}"
+        fi
+        set -e  # Re-enable exit on error
+
+        # Check if extraction was successful
+        if [ ${EXTRACTOR_EXIT_CODE} -eq 0 ] && [ -n "${JSON_LINE}" ]; then
+          echo "Extractor succeeded"
+          if [ "${VERBOSE}" != "true" ]; then
+            echo "${OUTPUT}"
+          fi
+
+          # Parse JSON output to extract all values
+          VERSION=$(echo "${JSON_LINE}" | jq -r '.version // ""' \
+            2>/dev/null || echo "")
+          PROJECT_TYPE=$(echo "${JSON_LINE}" | jq -r '.project_type // ""' \
+            2>/dev/null || echo "")
+          SUBTYPE=$(echo "${JSON_LINE}" | jq -r '.subtype // ""' \
+            2>/dev/null || echo "")
+          FILE_PATH=$(echo "${JSON_LINE}" | jq -r '.file // ""' \
+            2>/dev/null || echo "")
+          SUCCESS=$(echo "${JSON_LINE}" | jq -r '.success // false' \
+            2>/dev/null || echo "false")
+          MATCHED_BY=$(echo "${JSON_LINE}" | jq -r '.matched_by // ""' \
+            2>/dev/null || echo "")
+          VERSION_SOURCE=$(echo "${JSON_LINE}" | jq -r '.version_source // ""' \
+            2>/dev/null || echo "")
+          GIT_TAG=$(echo "${JSON_LINE}" | jq -r '.git_tag // ""' \
+            2>/dev/null || echo "")
+          ERROR_MSG=$(echo "${JSON_LINE}" | jq -r '.error // ""' \
+            2>/dev/null || echo "")
+
+          # Set all outputs
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "project-type=${PROJECT_TYPE}" >> "${GITHUB_OUTPUT}"
+          echo "subtype=${SUBTYPE}" >> "${GITHUB_OUTPUT}"
+          echo "file=${FILE_PATH}" >> "${GITHUB_OUTPUT}"
+          echo "success=${SUCCESS}" >> "${GITHUB_OUTPUT}"
+          echo "matched-by=${MATCHED_BY}" >> "${GITHUB_OUTPUT}"
+          echo "version-source=${VERSION_SOURCE}" >> "${GITHUB_OUTPUT}"
+          echo "git-tag=${GIT_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "error=${ERROR_MSG}" >> "${GITHUB_OUTPUT}"
+
+          # Add to step summary
+          echo "## 🔍 Version Extraction Results" >> \
+            "${GITHUB_STEP_SUMMARY}"
+          if [ "${SUCCESS}" = "true" ]; then
+            echo "✅ **Success**: Version extracted successfully" >> \
+              "${GITHUB_STEP_SUMMARY}"
+            echo "- **Version**: \`${VERSION}\`" >> \
+              "${GITHUB_STEP_SUMMARY}"
+            echo "- **Project Type**: ${PROJECT_TYPE}" >> \
+              "${GITHUB_STEP_SUMMARY}"
+            if [ -n "${SUBTYPE}" ]; then
+              echo "- **Subtype**: ${SUBTYPE}" >> \
+                "${GITHUB_STEP_SUMMARY}"
+            fi
+            echo "- **Source File**: \`${FILE_PATH}\`" >> \
+              "${GITHUB_STEP_SUMMARY}"
+            if [ -n "${VERSION_SOURCE}" ]; then
+              echo "- **Version Source**: ${VERSION_SOURCE}" >> \
+                "${GITHUB_STEP_SUMMARY}"
+            fi
+            if [ -n "${GIT_TAG}" ]; then
+              echo "- **Git Tag**: \`${GIT_TAG}\`" >> \
+                "${GITHUB_STEP_SUMMARY}"
+            fi
+          else
+            echo "❌ **Failed**: Could not extract version" >> \
+              "${GITHUB_STEP_SUMMARY}"
+          fi
+
+        else
+          # Extraction failed - capture full error output
+          if [ "${VERBOSE}" != "true" ]; then
+            ERROR_OUTPUT=$(./version-extract "${ARGS[@]}" 2>&1 || true)
+            echo "Extractor failed with output:"
+            echo "${ERROR_OUTPUT}"
+          else
+            ERROR_OUTPUT="${OUTPUT}"
+            echo "Extractor failed"
+          fi
+
+          # Set failure outputs
+          echo "version=" >> "${GITHUB_OUTPUT}"
+          echo "project-type=" >> "${GITHUB_OUTPUT}"
+          echo "subtype=" >> "${GITHUB_OUTPUT}"
+          echo "file=" >> "${GITHUB_OUTPUT}"
+          echo "success=false" >> "${GITHUB_OUTPUT}"
+          echo "matched-by=" >> "${GITHUB_OUTPUT}"
+          echo "version-source=" >> "${GITHUB_OUTPUT}"
+          echo "git-tag=" >> "${GITHUB_OUTPUT}"
+          echo "error=${ERROR_OUTPUT}" >> "${GITHUB_OUTPUT}"
+
+          # Add failure to step summary
+          echo "## 🔍 Version Extraction Results" >> \
+            "${GITHUB_STEP_SUMMARY}"
+          echo "❌ **Failed**: Version extraction failed" >> \
+            "${GITHUB_STEP_SUMMARY}"
+          echo "```" >> "${GITHUB_STEP_SUMMARY}"
+          echo "${ERROR_OUTPUT}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "```" >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${FAIL_ON_ERROR}" = "true" ]; then
+            echo "::error::Version extraction failed: ${ERROR_OUTPUT}"
+            exit 1
+          else
+            echo "::warning::Version extraction failed: ${ERROR_OUTPUT}"
+          fi
+        fi
+
+branding:
+  icon: "search"
+  color: "blue"
