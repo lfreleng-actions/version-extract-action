@@ -1,0 +1,830 @@
+---
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 The Linux Foundation
+
+# Default patterns for version extraction from various project types
+# Ordered by popularity/usage frequency
+
+projects:
+  # JavaScript/Node.js - Most popular
+  - type: JavaScript
+    subtype: npm
+    file: package.json
+    regex:
+      - '"version":\s*"([^"]+)"'
+      - '"version"\s*:\s*"([^"]+)"'
+    samples:
+      - https://github.com/facebook/react
+      - https://github.com/nodejs/node
+      - https://github.com/microsoft/TypeScript
+    priority: 1
+    notes: "Standard npm package.json format"
+    supports_dynamic_versioning: true
+    dynamic_version_indicators:
+      - field: "version"
+        contains: ["0.0.0-development", "0.0.0-semantic-release"]
+      - field: "scripts"
+        contains: ["semantic-release", "auto-release"]
+    fallback_strategy: "git-tags"
+
+  # Python - Modern pyproject.toml
+  - type: Python
+    subtype: "Modern (pyproject.toml)"
+    file: pyproject.toml
+    regex:
+      - 'version\s*=\s*["'']([^"'']+)["'']'
+      - '__version__\s*=\s*["'']([^"'']+)["'']'
+      - 'version\s*=\s*["'']?([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][^"'']*)?)'
+      - '\[project\][\s\S]*?version\s*=\s*["'']([^"'']+)["'']'
+    samples:
+      - https://github.com/python/cpython
+      - https://github.com/pallets/flask
+      - https://github.com/psf/requests
+    priority: 2
+    notes: "PEP 621 compliant modern Python projects"
+    supports_dynamic_versioning: true
+    dynamic_version_indicators:
+      - path: "[project]"
+        field: "dynamic"
+        contains: ["version"]
+      - path: "[tool.setuptools_scm]"
+        exists: true
+      - path: "[tool.versioneer]"
+        exists: true
+    fallback_strategy: "git-tags"
+
+  # Java - Maven
+  - type: Java
+    subtype: Maven
+    file: pom.xml
+    regex:
+      - '<project>[\s\S]*?<version>([^<]+)</version>'
+      - '<version>([^<]+)</version>'
+      - '<version>\s*([^<\s]+)\s*</version>'
+    samples:
+      - https://github.com/spring-projects/spring-boot
+      - https://github.com/elastic/elasticsearch
+      - https://github.com/apache/maven
+    priority: 3
+    notes: "Maven pom.xml version extraction"
+    supports_dynamic_versioning: true
+    dynamic_version_indicators:
+      - field: "version"
+        contains: ["${revision}", "${project.version}", "SNAPSHOT"]
+      - path: "<properties>"
+        exists: true
+      - field: "plugin"
+        contains: ["git-commit-id", "buildnumber-maven", "versions-maven"]
+    fallback_strategy: "git-tags"
+
+  # Java - Gradle
+  - type: Java
+    subtype: Gradle
+    file: build.gradle
+    regex:
+      - 'version\s*=\s*[''"]([^''"]+)[''"]'
+      - 'version\s*[''"]([^''"]+)[''"]'
+    samples:
+      - https://github.com/gradle/gradle
+      - https://github.com/square/okhttp
+      - https://github.com/ReactiveX/RxJava
+    priority: 4
+    notes: "Gradle build script version"
+
+  # C#/.NET
+  - type: CSharp
+    subtype: ".NET Project"
+    file: "*.csproj"
+    regex:
+      - '<Version[^>]*>([^<]+)</Version>'
+      - '<VersionPrefix[^>]*>([^<]+)</VersionPrefix>'
+      - '<AssemblyVersion[^>]*>([^<]+)</AssemblyVersion>'
+      - '<FileVersion[^>]*>([^<]+)</FileVersion>'
+    samples:
+      - https://github.com/JamesNK/Newtonsoft.Json
+      - https://github.com/serilog/serilog
+      - https://github.com/nhibernate/nhibernate-core
+    priority: 5
+    notes: "C# project file version tags"
+
+  - type: CSharp
+    subtype: ".NET Build Props"
+    file: "*.props"
+    regex:
+      - '<VersionPrefix[^>]*>([^<]+)</VersionPrefix>'
+      - '<Version[^>]*>([^<]+)</Version>'
+      - '<AssemblyVersion[^>]*>([^<]+)</AssemblyVersion>'
+      - '<FileVersion[^>]*>([^<]+)</FileVersion>'
+      - '<NhVersion[^>]*>([^<]+)</NhVersion>'
+      - '<PackageVersion[^>]*>([^<]+)</PackageVersion>'
+    samples:
+      - https://github.com/serilog/serilog
+      - https://github.com/JamesNK/Newtonsoft.Json
+    priority: 4
+    notes: "C# build properties version tags including custom properties"
+
+  # Autoconf/Autotools projects
+  - type: C
+    subtype: "Autoconf"
+    file: configure.ac
+    regex:
+      - 'AC_INIT\s*\([^,]*,\s*\[?([0-9]+\.[0-9]+(?:\.[0-9]+)?[^,\]]*)\]?'
+      - 'VERSION\s*=\s*["'']([^"'']+)["'']'
+      - 'PACKAGE_VERSION\s*=\s*["'']([^"'']+)["'']'
+      - '[A-Z_]*VERSION[A-Z_]*\s*=\s*["'']([^"'']+)["'']'
+    samples:
+      - https://github.com/libffi/libffi
+      - https://github.com/zlib-ng/zlib-ng
+    priority: 8
+    notes: "Autoconf configure.ac version extraction"
+
+  - type: C
+    subtype: "Autoconf Alternative"
+    file: configure.in
+    regex:
+      - 'AC_INIT\s*\([^,]*,\s*\[?([0-9]+\.[0-9]+(?:\.[0-9]+)?[^,\]]*)\]?'
+      - 'VERSION\s*=\s*["'']([^"'']+)["'']'
+      - '[A-Z_]*VERSION[A-Z_]*\s*=\s*["'']([^"'']+)["'']'
+    samples:
+      - https://github.com/libffi/libffi
+    priority: 9
+    notes: "Legacy Autoconf configure.in version extraction"
+
+  # Go
+  - type: Go
+    subtype: "Go Module"
+    file: go.mod
+    regex:
+      - 'module\s+[^\s]+\s+v([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+      - 'go\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    samples:
+      - https://github.com/golang/go
+      - https://github.com/kubernetes/kubernetes
+      - https://github.com/moby/moby
+    priority: 6
+    notes: "Go module version from go.mod"
+    supports_dynamic_versioning: true
+    dynamic_version_indicators:
+      - field: "version"
+        contains: ["v0.0.0", "v0.1.0"]
+      - path: "go.mod"
+        field: "module"
+        contains: ["github.com", "gitlab.com"]
+    fallback_strategy: "git-tags"
+
+  # PHP
+  - type: PHP
+    subtype: Composer
+    file: composer.json
+    regex:
+      - '"version":\s*"([^"]+)"'
+      - '"version"\s*:\s*"([^"]+)"'
+    samples:
+      - https://github.com/laravel/framework
+      - https://github.com/symfony/symfony
+      - https://github.com/composer/composer
+    priority: 7
+    notes: "PHP Composer package version"
+
+  # Ruby
+  - type: Ruby
+    subtype: Gemspec
+    file: "*.gemspec"
+    regex:
+      - 's\.version\s*=\s*[''"]([^''"]+)[''"]'
+      - 'version\s*=\s*[''"]([^''"]+)[''"]'
+    samples:
+      - https://github.com/rails/rails
+      - https://github.com/jekyll/jekyll
+      - https://github.com/rubygems/rubygems
+    priority: 8
+    notes: "Ruby gem specification version"
+
+  # Python - Legacy setup.py
+  - type: Python
+    subtype: "Legacy (setup.py)"
+    file: setup.py
+    regex:
+      - 'version\s*=\s*[''"]([^''"]+)[''"]'
+      - '__version__\s*=\s*[''"]([^''"]+)[''"]'
+      - 'version\s*=\s*[''"]?([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    samples:
+      - https://github.com/pypa/pip
+      - https://github.com/python-pillow/Pillow
+      - https://github.com/requests/requests
+    priority: 9
+    notes: "Legacy Python setup.py files"
+
+  # Python - setup.cfg
+  - type: Python
+    subtype: "setup.cfg"
+    file: setup.cfg
+    regex:
+      - 'version\s*=\s*([^\s\n]+)'
+      - 'version\s*=\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    samples:
+      - https://github.com/pypa/setuptools
+      - https://github.com/pypa/wheel
+    priority: 9
+    notes: "Python setup.cfg configuration files"
+
+  # Python - __init__.py version
+  - type: Python
+    subtype: "Module Version"
+    file: "__init__.py"
+    regex:
+      - '__version__\s*=\s*[''"]([^''"]+)[''"]'
+      - 'VERSION\s*=\s*[''"]([^''"]+)[''"]'
+      - '__VERSION__\s*=\s*[''"]([^''"]+)[''"]'
+    samples:
+      - https://github.com/pallets/flask
+      - https://github.com/psf/black
+    priority: 10
+    notes: "Python module __init__.py version definitions"
+
+  # Rust
+  - type: Rust
+    subtype: Cargo
+    file: Cargo.toml
+    regex:
+      - 'version\s*=\s*"([^"]+)"'
+      - 'version\s*=\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"'
+    samples:
+      - https://github.com/rust-lang/rust
+      - https://github.com/rustdesk/rustdesk
+      - https://github.com/tauri-apps/tauri
+    priority: 11
+    notes: "Rust Cargo.toml version specification"
+    supports_dynamic_versioning: true
+    dynamic_version_indicators:
+      - field: "version"
+        contains: ["0.0.0", "0.1.0-dev"]
+      - path: "[package.metadata.release]"
+        exists: true
+      - field: "build"
+        contains: ["build.rs"]
+    fallback_strategy: "git-tags"
+
+  # Swift
+  - type: Swift
+    subtype: "Swift Package"
+    file: Package.swift
+    regex:
+      - 'version:\s*"([^"]+)"'
+      - '\.package\(.*from:\s*"([^"]+)"'
+      - '\.package\(.*exact:\s*"([^"]+)"'
+      - '\.package\(.*\.\.\.<\s*"([^"]+)"'
+      - '\.package\(.*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"'
+    samples:
+      - https://github.com/apple/swift
+      - https://github.com/swiftlang/swift-package-manager
+      - https://github.com/Alamofire/Alamofire
+    priority: 12
+    notes: "Swift Package Manager version"
+
+  # Dart/Flutter
+  - type: Flutter
+    subtype: "pubspec.yaml"
+    file: pubspec.yaml
+    regex:
+      - '^version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9]+)?)'
+      - 'version:\s*([^+\s]+)'
+      - 'version:\s*([0-9]+\.[0-9]+\.[0-9]+)'
+    samples:
+      - https://github.com/flutter/flutter
+      - https://github.com/dart-lang/sdk
+      - https://github.com/flame-engine/flame
+    priority: 13
+    notes: "Flutter project version with optional build number"
+
+  # C/C++
+  - type: C
+    subtype: CMake
+    file: CMakeLists.txt
+    regex:
+      - 'project\([^)]*VERSION\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+      - 'set\(VERSION\s+"?([^")\s]+)"?\)'
+    samples:
+      - https://github.com/microsoft/vcpkg
+      - https://github.com/opencv/opencv
+      - https://github.com/catchorg/Catch2
+    priority: 14
+    notes: "CMake project version specification"
+
+  - type: C
+    subtype: "Header Files"
+    file: "*.h"
+    regex:
+      - '#define\s+\w*VERSION\w*\s+"([^"]+)"'
+      - '#define\s+VERSION\s+"([^"]+)"'
+      - '#define\s+ZLIB_VERSION\s+"([^"]+)"'
+      - '#define\s+ZLIBNG_VERSION\s+"([^"]+)"'
+      - '#define\s+\w+_VERSION\s+"([^"]+)"'
+    samples:
+      - https://github.com/zlib-ng/zlib-ng
+      - https://github.com/madler/zlib
+      - https://github.com/curl/curl
+    priority: 13
+    notes: "C/C++ header file version definitions"
+
+  - type: C
+    subtype: "Header Template Files"
+    file: "*.h.in"
+    regex:
+      - '#define\s+\w*VERSION\w*\s+"([^"]+)"'
+      - '#define\s+VERSION\s+"([^"]+)"'
+      - '#define\s+ZLIB_VERSION\s+"([^"]+)"'
+      - '#define\s+ZLIBNG_VERSION\s+"([^"]+)"'
+      - '#define\s+\w+_VERSION\s+"([^"]+)"'
+    samples:
+      - https://github.com/zlib-ng/zlib-ng
+      - https://github.com/madler/zlib
+      - https://github.com/curl/curl
+    priority: 12
+    notes: "C/C++ header template files with version definitions"
+
+  # Elixir
+  - type: Elixir
+    subtype: Mix
+    file: mix.exs
+    regex:
+      - 'version:\s*"([^"]+)"'
+      - '@version\s*"([^"]+)"'
+    samples:
+      - https://github.com/elixir-lang/elixir
+      - https://github.com/phoenixframework/phoenix
+      - https://github.com/absinthe-graphql/absinthe
+    priority: 15
+    notes: "Elixir Mix project version"
+
+  # Scala
+  - type: Scala
+    subtype: SBT
+    file: build.sbt
+    regex:
+      - 'version\s*:=\s*"([^"]+)"'
+      - 'ThisBuild\s*/\s*version\s*:=\s*"([^"]+)"'
+    samples:
+      - https://github.com/akka/akka
+      - https://github.com/apache/spark
+      - https://github.com/playframework/playframework
+    priority: 16
+    notes: "Scala SBT build version"
+
+  # Haskell
+  - type: Haskell
+    subtype: Cabal
+    file: "*.cabal"
+    regex:
+      - 'version:\s*([^\s]+)'
+      - 'Version:\s*([^\s]+)'
+    samples:
+      - https://github.com/haskell/cabal
+      - https://github.com/ghc/ghc
+      - https://github.com/commercialhaskell/stack
+    priority: 17
+    notes: "Haskell Cabal package version"
+
+  # Julia
+  - type: Julia
+    subtype: "Julia Project"
+    file: Project.toml
+    regex:
+      - 'version\s*=\s*"([^"]+)"'
+      - 'version\s*=\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"'
+    samples:
+      - https://github.com/JuliaLang/julia
+      - https://github.com/FluxML/Flux.jl
+      - https://github.com/JuliaPlots/Plots.jl
+    priority: 18
+    notes: "Julia Project.toml version"
+
+  # R
+  - type: R
+    subtype: "R Package"
+    file: DESCRIPTION
+    regex:
+      - 'Version:\s*([^\s]+)'
+      - '^Version:\s*([^\r\n]+)'
+    samples:
+      - https://github.com/tidyverse/ggplot2
+      - https://github.com/rstudio/shiny
+      - https://github.com/tidyverse/dplyr
+    priority: 19
+    notes: "R package DESCRIPTION file"
+
+  # Perl
+  - type: Perl
+    subtype: "Perl Distribution"
+    file: "*.pm"
+    regex:
+      - 'our\s+\$VERSION\s*=\s*[''"]([^''"]+)[''"]'
+      - '\$VERSION\s*=\s*[''"]([^''"]+)[''"]'
+    samples:
+      - https://github.com/perl/perl5
+      - https://github.com/mojolicious/mojo
+      - https://github.com/PerlDancer/Dancer2
+    priority: 20
+    notes: "Perl module version variable"
+
+  # Perl Script Files
+  - type: Perl
+    subtype: "Perl Script"
+    file: "*.pl"
+    regex:
+      - 'our\s+\$VERSION\s*=\s*[''"]([^''"]+)[''"]'
+      - '\$VERSION\s*=\s*[''"]([^''"]+)[''"]'
+    samples:
+      - https://github.com/perl/perl5
+    priority: 21
+    notes: "Perl script version variable"
+
+  # Lua
+  - type: Lua
+    subtype: "LuaRocks"
+    file: "*.rockspec"
+    regex:
+      - 'version\s*=\s*["'']([^"'']+)["'']'
+      - 'package\s*=\s*["''][^"'']*-([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    samples:
+      - https://github.com/luarocks/luarocks
+      - https://github.com/luarocks/luarocks-site
+      - https://github.com/keplerproject/lua-compat-5.3
+    priority: 22
+    notes: "Lua rockspec version specification"
+
+  # Helm Charts (directory format)
+  - type: Helm
+    subtype: "Chart Directory"
+    file: Chart.yaml
+    regex:
+      - 'version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'appVersion:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+    samples:
+      - https://github.com/prometheus-community/helm-charts
+      - https://github.com/kubernetes/ingress-nginx
+      - https://github.com/grafana/helm-charts
+    priority: 23
+    notes: "Helm Chart.yaml version and appVersion extraction"
+
+  # Dockerfiles
+  - type: Docker
+    subtype: "Dockerfile"
+    file: Dockerfile
+    regex:
+      - 'LABEL\s+version=["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'LABEL\s+.*\.version=["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'ARG\s+VERSION=["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'ENV\s+VERSION=["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+    samples:
+      - https://github.com/docker-library/official-images
+      - https://github.com/moby/moby
+      - https://github.com/grafana/grafana
+    priority: 24
+    notes: "Docker image version from labels and build args"
+
+  # Terraform modules
+  - type: Terraform
+    subtype: "Module"
+    file: versions.tf
+    regex:
+      - 'version\s*=\s*["'']([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']'
+      - 'required_version\s*=\s*["'']>=?\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    samples:
+      - https://github.com/terraform-aws-modules/terraform-aws-vpc
+      - https://github.com/terraform-aws-modules/terraform-aws-eks
+      - https://github.com/hashicorp/terraform-provider-aws
+    priority: 25
+    notes: "Terraform module and provider versions"
+
+  # Ansible Galaxy metadata
+  - type: Ansible
+    subtype: "Galaxy Collection"
+    file: galaxy.yml
+    regex:
+      - 'version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+    samples:
+      - https://github.com/ansible-collections/community.general
+      - https://github.com/ansible-collections/ansible.posix
+      - https://github.com/ansible-collections/kubernetes.core
+    priority: 26
+    notes: "Ansible Galaxy collection version"
+
+  # Ansible Role metadata
+  - type: Ansible
+    subtype: "Role"
+    file: meta/main.yml
+    regex:
+      - 'version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'galaxy_info:\s*\n(?:[^\n]*\n)*\s*version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+    samples:
+      - https://github.com/ansible/ansible
+      - https://github.com/ansible-community/molecule
+      - https://github.com/ansible-collections/community.general
+    priority: 27
+    notes: "Ansible role metadata version"
+
+  # Kubernetes manifests
+  - type: Kubernetes
+    subtype: "Manifest"
+    file: "*.yaml"
+    regex:
+      - 'app\.kubernetes\.io/version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+    samples:
+      - https://github.com/kubernetes/examples
+      - https://github.com/kubernetes-sigs/kustomize
+      - https://github.com/argoproj/argo-cd
+    priority: 28
+    notes: "Kubernetes resource version annotations"
+
+  # Docker Compose files
+  - type: Docker
+    subtype: "Compose"
+    file: docker-compose.yml
+    regex:
+      - 'image:\s*[^:]+:([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)'
+      - 'version:\s*["'']?([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+    samples:
+      - https://github.com/docker/awesome-compose
+      - https://github.com/dockersamples/example-voting-app
+      - https://github.com/docker/compose
+    priority: 29
+    notes: "Docker Compose image versions and compose version"
+
+  # OpenAPI/Swagger specifications
+  - type: OpenAPI
+    subtype: "Specification"
+    file: openapi.yaml
+    regex:
+      - 'version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - '"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)"'
+    samples:
+      - https://github.com/OAI/OpenAPI-Specification
+      - https://github.com/swagger-api/swagger-petstore
+      - https://github.com/APIs-guru/openapi-directory
+    priority: 30
+    notes: "OpenAPI specification version field"
+
+  # Gradle Kotlin DSL
+  - type: Java
+    subtype: "Gradle Kotlin"
+    file: build.gradle.kts
+    regex:
+      - 'version\s*=\s*"([^"]+)"'
+      - 'version\s*=\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"'
+    samples:
+      - https://github.com/JetBrains/kotlin
+      - https://github.com/gradle/gradle
+      - https://github.com/spring-projects/spring-boot
+    priority: 31
+    notes: "Gradle Kotlin DSL build script version"
+
+  # Julia Manifest
+  - type: Julia
+    subtype: "Manifest"
+    file: Manifest.toml
+    regex:
+      - 'version\s*=\s*"([^"]+)"'
+      - '\[\[([^]]+)\]\]\s*version\s*=\s*"([^"]+)"'
+    samples:
+      - https://github.com/JuliaLang/Pkg.jl
+      - https://github.com/JuliaPlots/Plots.jl
+      - https://github.com/FluxML/Flux.jl
+    priority: 32
+    notes: "Julia package manifest version"
+
+  # Snap packages
+  - type: Snap
+    subtype: "Package"
+    file: snapcraft.yaml
+    regex:
+      - 'version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'version:\s*["'']?([^"''\s]+)["'']?'
+    samples:
+      - https://github.com/snapcore/snapcraft
+      - https://github.com/canonical/snapd
+    priority: 33
+    notes: "Snap package version from snapcraft.yaml"
+
+  # Homebrew Formulas
+  - type: Homebrew
+    subtype: "Formula"
+    file: "*.rb"
+    regex:
+      - 'version\s+"([^"]+)"'
+      - 'url\s+"[^"]*\/([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)\/'
+    samples:
+      - https://github.com/Homebrew/homebrew-core
+      - https://github.com/Homebrew/homebrew-cask
+      - https://github.com/Homebrew/brew
+    priority: 34
+    notes: "Homebrew formula version specification"
+
+  # VSCode Extensions
+  - type: VSCode
+    subtype: "Extension"
+    file: package.json
+    regex:
+      - '"version":\s*"([^"]+)"'
+      - '"version"\s*:\s*"([^"]+)"'
+    samples:
+      - https://github.com/microsoft/vscode-python
+      - https://github.com/microsoft/vscode-eslint
+      - https://github.com/microsoft/vscode-cpptools
+    priority: 35
+    notes: "VSCode extension version from package.json"
+
+  # Chrome/Firefox Extensions
+  - type: WebExtension
+    subtype: "Manifest"
+    file: manifest.json
+    regex:
+      - '"version":\s*"([^"]+)"'
+      - '"version"\s*:\s*"([^"]+)"'
+    samples:
+      - https://github.com/AdguardTeam/AdguardBrowserExtension
+      - https://github.com/gorhill/uBlock
+      - https://github.com/bitwarden/browser
+    priority: 36
+    notes: "Web extension manifest version"
+
+  # GitHub Actions
+  - type: GitHubAction
+    subtype: "Action"
+    file: action.yml
+    regex:
+      - 'version:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'description:\s*.*v([0-9]+\.[0-9]+\.[0-9]+)'
+    samples:
+      - https://github.com/actions/checkout
+      - https://github.com/actions/setup-node
+      - https://github.com/actions/upload-artifact
+    priority: 37
+    notes: "GitHub Action version metadata"
+
+  # Flatpak manifests
+  - type: Flatpak
+    subtype: "Manifest"
+    file: "*.flatpak.yml"
+    regex:
+      - 'tag:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+      - 'branch:\s*["'']?([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)["'']?'
+    samples:
+      - https://github.com/flatpak/flatpak
+      - https://github.com/flatpak/xdg-desktop-portal
+    priority: 38
+    notes: "Flatpak application manifest version"
+
+  # AppImage metadata
+  - type: AppImage
+    subtype: "Desktop"
+    file: "*.desktop"
+    regex:
+      - 'Version=([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)'
+      - 'X-AppImage-Version=([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)'
+    samples:
+      - https://github.com/probonopd/linuxdeployqt
+      - https://github.com/AppImageCrafters/appimage-builder
+      - https://github.com/AppImage/AppImageUpdate
+    priority: 39
+    notes: "AppImage desktop file version metadata"
+
+  # Yarn Workspaces
+  - type: JavaScript
+    subtype: "Yarn Workspace"
+    file: yarn.lock
+    regex:
+      - '"([^@\s]+)@\*":\s*\n\s*version\s+"([^"]+)"'
+      - '"([^@\s]+)@.*":\s*\n\s*version\s+"([^"]+)"'
+    samples:
+      - https://github.com/yarnpkg/yarn
+      - https://github.com/facebook/create-react-app
+      - https://github.com/storybookjs/storybook
+    priority: 40
+    notes: "Yarn workspace dependency versions"
+
+  # Maven Gradle
+  - type: Java
+    subtype: "Maven Gradle"
+    file: gradle.properties
+    regex:
+      - 'version\s*=\s*([^\s\n]+)'
+      - 'projectVersion\s*=\s*([^\s\n]+)'
+      - 'VERSION_NAME\s*=\s*([^\s\n]+)'
+    samples:
+      - https://github.com/spring-projects/spring-boot
+      - https://github.com/elastic/elasticsearch
+      - https://github.com/gradle/gradle
+      - https://github.com/cashapp/paparazzi
+    priority: 41
+    notes: "Gradle properties file version"
+
+  # Meson Build
+  - type: C
+    subtype: "Meson"
+    file: meson.build
+    regex:
+      - "version\\s*:\\s*'([^']+)'"
+      - 'version\\s*:\\s*"([^"]+)"'
+    samples:
+      - https://github.com/mesonbuild/meson
+      - https://github.com/libffi/libffi
+      - https://github.com/json-c/json-c
+    priority: 42
+    notes: "Meson build system project version"
+
+  # Makefile
+  - type: C
+    subtype: "Makefile"
+    file: Makefile
+    regex:
+      - 'VERSION\s*[?:]?=\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)'
+      - 'VER\s*[?:]?=\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?)'
+    samples:
+      - https://github.com/torvalds/linux
+      - https://github.com/git/git
+      - https://github.com/zlib-ng/zlib-ng
+    priority: 43
+    notes: "Makefile version variable definition"
+
+  # Android - build.gradle
+  - type: Android
+    subtype: "Gradle"
+    file: build.gradle
+    regex:
+      - 'versionName\s*=?\s*["'']([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-\.][a-zA-Z0-9]+)?)["'']'
+      - 'versionCode\s*=?\s*([0-9]+)'
+    samples:
+      - https://github.com/signalapp/Signal-Android
+      - https://github.com/TeamNewPipe/NewPipe
+      - https://github.com/mozilla-mobile/firefox-android
+    priority: 44
+    notes: "Android application version from build.gradle"
+
+  # Android - build.gradle.kts
+  - type: Android
+    subtype: "Gradle (Kotlin)"
+    file: build.gradle.kts
+    regex:
+      - 'versionName\s*=\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-\.][a-zA-Z0-9]+)?)"'
+      - 'versionCode\s*=\s*([0-9]+)'
+    samples:
+      - https://github.com/JetBrains/compose-multiplatform
+      - https://github.com/android/compose-samples
+      - https://github.com/cashapp/paparazzi
+    priority: 45
+    notes: "Android Kotlin Gradle version"
+
+  # iOS - Info.plist
+  - type: iOS
+    subtype: "Info.plist"
+    file: Info.plist
+    regex:
+      - '<key>CFBundleShortVersionString</key>\s*<string>([0-9]+\.[0-9]+(?:\.[0-9]+)?)</string>'
+      - '<key>CFBundleVersion</key>\s*<string>([0-9]+)</string>'
+    samples:
+      - https://github.com/signalapp/Signal-iOS
+      - https://github.com/mozilla-mobile/firefox-ios
+      - https://github.com/wireapp/wire-ios
+    priority: 46
+    notes: "iOS application version from Info.plist"
+
+  # Kotlin Gradle
+  - type: Kotlin
+    subtype: "Gradle"
+    file: build.gradle.kts
+    regex:
+      - 'version\s*=\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-\.][a-zA-Z0-9]+)?)"'
+    samples:
+      - https://github.com/JetBrains/kotlin
+      - https://github.com/square/okhttp
+      - https://github.com/ben-manes/gradle-versions-plugin
+    priority: 47
+    notes: "Kotlin project version in Gradle"
+
+  # Elixir
+  - type: Elixir
+    subtype: "mix.exs"
+    file: mix.exs
+    regex:
+      - 'version:\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-\.][a-zA-Z0-9]+)?)"'
+    samples:
+      - https://github.com/elixir-lang/elixir
+      - https://github.com/phoenixframework/phoenix
+      - https://github.com/plausible/analytics
+    priority: 48
+    notes: "Elixir mix project version"
+
+  # Crystal
+  - type: Crystal
+    subtype: "shard.yml"
+    file: shard.yml
+    regex:
+      - '^version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    samples:
+      - https://github.com/crystal-lang/crystal
+      - https://github.com/crystal-lang/shards
+      - https://github.com/luckyframework/lucky
+    priority: 49
+    notes: "Crystal shard version"

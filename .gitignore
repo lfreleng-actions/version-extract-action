@@ -1,8 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
+CLAUDE.md
+/version-extract
+
 # Temporary and binary files
+/test-**
+/coverage.*
+integration-test-report.html
+integration-test-report.json
 *~
+.reuse
 *.py[cod]
 *.so
 *.cfg
