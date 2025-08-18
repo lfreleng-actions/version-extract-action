@@ -510,7 +510,7 @@ EOF
 }
 
 # Cleanup function
-# shellcheck disable=SC2317  # Function is called via trap
+# shellcheck disable=SC2329,SC2317  # Function is called via trap
 cleanup() {
     if [[ -d "$WORK_DIR" ]]; then
         echo "🔍 Cleaning up work directory: $WORK_DIR"
