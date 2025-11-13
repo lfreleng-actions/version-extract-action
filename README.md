@@ -307,20 +307,46 @@ patterns, regex patterns, dynamic versioning indicators, and metadata.
 
 ## Development
 
-### Building
+For detailed development instructions, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+### Quick Start
 
 ```bash
-go build -o version-extract cmd/version-extract/main.go
+# Install pre-commit hooks (runs Go fmt, vet, and other checks automatically)
+pre-commit install
+
+# Quick development cycle
+make dev
+
+# Full CI validation
+make ci
 ```
 
-### Testing
+### Pre-commit Hooks
+
+Git hooks run automatically before each commit, matching CI requirements:
+
+- **go fmt** - Code formatting (`gofmt -l .`)
+- **go vet** - Static analysis (`go vet ./...`)
+- **go mod verify** - Dependency verification
+- **go mod tidy** - Dependency cleanup
+
+These hooks prevent CI failures by catching issues locally before pushing.
+
+### Common Commands
 
 ```bash
-go test ./...
+# Format code
+make fmt
+
+# Run tests
+make test
+
+# Run all linters
+make lint-full
+
+# Build binary
+make build
 ```
 
-### Linting
-
-```bash
-pre-commit run --all-files
-```
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for complete documentation.

@@ -11,6 +11,9 @@ ci:
     Chore: pre-commit autoupdate
 
     Signed-off-by: pre-commit-ci[bot] <pre-commit-ci@users.noreply.github.com>
+  # Skip Go hooks in pre-commit.ci - they require network access to download
+  # dependencies which is not permitted in the CI environment
+  skip: [go-vet, go-mod-verify, go-mod-tidy]
 
 exclude: "^(docs/conf.py|test-workspace/)"
 
@@ -113,3 +116,38 @@ repos:
         types:
           - yaml
       - id: check-readthedocs
+
+  # Go language quality checks - matches CI requirements exactly
+  # See .github/workflows/testing.yaml for CI implementation
+  - repo: local
+    hooks:
+      - id: go-fmt
+        name: go fmt (CI requirement)
+        description: Runs `gofmt -l .` to check formatting, as CI does
+        entry: >
+          bash -c 'if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
+          echo "❌ Code is not formatted:"; gofmt -l .; exit 1; fi'
+        language: system
+        files: '\.go$'
+        pass_filenames: false
+      - id: go-vet
+        name: go vet (CI requirement)
+        description: Runs `go vet ./...`, exactly as CI does
+        entry: go vet ./...
+        language: system
+        files: '\.go$'
+        pass_filenames: false
+      - id: go-mod-verify
+        name: go mod verify
+        description: Verifies dependencies, as CI does
+        entry: bash -c 'go mod download && go mod verify'
+        language: system
+        files: '^go\.(mod|sum)$'
+        pass_filenames: false
+      - id: go-mod-tidy
+        name: go mod tidy
+        description: Ensures go.mod and go.sum are tidy
+        entry: bash -c 'go mod tidy && git diff --exit-code go.mod go.sum'
+        language: system
+        files: '^go\.(mod|sum)$'
+        pass_filenames: false

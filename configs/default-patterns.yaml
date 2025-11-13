@@ -28,20 +28,30 @@ projects:
     fallback_strategy: "git-tags"
 
   # Python - Modern pyproject.toml
+  # IMPORTANT: This project type uses a special handler
+  # (extractFromPyprojectToml) that completely bypasses regex-based
+  # extraction. ALL files ending with "pyproject.toml" trigger this
+  # handler (see extractVersionFromFile in extractor.go), regardless of
+  # configuration.
+  # The handler does section-aware parsing to extract version from
+  # the [project] section, or falls back to __version__.py files.
+  #
+  # The regex below exists only for config consistency and validation.
+  # It will NEVER be invoked during actual version extraction.
   - type: Python
     subtype: "Modern (pyproject.toml)"
     file: pyproject.toml
     regex:
+      # NEVER USED - special handler bypasses regex extraction entirely
       - 'version\s*=\s*["'']([^"'']+)["'']'
-      - '__version__\s*=\s*["'']([^"'']+)["'']'
-      - 'version\s*=\s*["'']?([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][^"'']*)?)'
-      - '\[project\][\s\S]*?version\s*=\s*["'']([^"'']+)["'']'
     samples:
       - https://github.com/python/cpython
       - https://github.com/pallets/flask
       - https://github.com/psf/requests
     priority: 2
-    notes: "PEP 621 compliant modern Python projects"
+    notes: >-
+      PEP 621 compliant modern Python projects. Uses
+      extractFromPyprojectToml() for section-aware parsing.
     supports_dynamic_versioning: true
     dynamic_version_indicators:
       - path: "[project]"
@@ -154,15 +164,13 @@ projects:
   - type: Go
     subtype: "Go Module"
     file: go.mod
-    regex:
-      - 'module\s+[^\s]+\s+v([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
-      - 'go\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    regex: []
     samples:
       - https://github.com/golang/go
       - https://github.com/kubernetes/kubernetes
       - https://github.com/moby/moby
     priority: 6
-    notes: "Go module version from go.mod"
+    notes: "Go modules use git tags for versioning - not embedded in go.mod"
     supports_dynamic_versioning: true
     dynamic_version_indicators:
       - field: "version"
@@ -312,6 +320,17 @@ projects:
     notes: "CMake project version specification"
 
   - type: C
+    subtype: "Qt qmake"
+    file: ".qmake.conf"
+    regex:
+      - 'MODULE_VERSION\s*=\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+      - 'VERSION\s*=\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)'
+    samples:
+      - https://github.com/probonopd/linuxdeployqt
+    priority: 14
+    notes: "Qt qmake configuration file version"
+
+  - type: C
     subtype: "Header Files"
     file: "*.h"
     regex:
@@ -370,6 +389,11 @@ projects:
       - https://github.com/playframework/playframework
     priority: 16
     notes: "Scala SBT build version"
+    supports_dynamic_versioning: true
+    dynamic_version_indicators:
+      - field: "version"
+        contains: ["dynver", "git.gitDescribedVersion", "versionFromGit"]
+    fallback_strategy: "git-tags"
 
   # Haskell
   - type: Haskell
