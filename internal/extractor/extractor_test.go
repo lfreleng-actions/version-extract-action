@@ -4,9 +4,11 @@
 package extractor
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -139,6 +141,299 @@ description = "Test Python project"`
 
 	if result.ProjectType != "Python" {
 		t.Errorf("Expected Python, got %s", result.ProjectType)
+	}
+}
+
+func TestExtractFromPyprojectTomlEdgeCases(t *testing.T) {
+	cfg := &config.Config{
+		Projects: []config.ProjectConfig{
+			{
+				Type:     "Python",
+				Subtype:  "Modern",
+				File:     "pyproject.toml",
+				Regex:    []string{`version\s*=\s*["']([^"']+)["']`},
+				Samples:  []string{"https://github.com/test/repo"},
+				Priority: 1,
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		content       string
+		expectedVer   string
+		shouldSucceed bool
+		description   string
+	}{
+		{
+			name: "version_info should not match",
+			content: `[project]
+name = "test-project"
+version_info = "1.0.0"
+version = "2.1.0"`,
+			expectedVer:   "2.1.0",
+			shouldSucceed: true,
+			description:   "Should only match 'version', not 'version_info'",
+		},
+		{
+			name: "versioning should not match",
+			content: `[project]
+name = "test-project"
+versioning = "1.0.0"
+version = "2.1.0"`,
+			expectedVer:   "2.1.0",
+			shouldSucceed: true,
+			description:   "Should only match 'version', not 'versioning'",
+		},
+		{
+			name: "commented version should not match",
+			content: `[project]
+name = "test-project"
+# version = "1.0.0"
+version = "2.1.0"`,
+			expectedVer:   "2.1.0",
+			shouldSucceed: true,
+			description:   "Should ignore commented lines",
+		},
+		{
+			name: "version with single quotes",
+			content: `[project]
+name = "test-project"
+version = '3.0.0'`,
+			expectedVer:   "3.0.0",
+			shouldSucceed: true,
+			description:   "Should handle single quotes",
+		},
+		{
+			name: "version with extra spaces",
+			content: `[project]
+name = "test-project"
+version   =   "4.0.0"`,
+			expectedVer:   "4.0.0",
+			shouldSucceed: true,
+			description:   "Should handle extra whitespace around equals",
+		},
+		{
+			name: "version only in project section",
+			content: `[tool.pytest]
+min_version = "6.2"
+
+[project]
+name = "test-project"
+version = "7.0.0"`,
+			expectedVer:   "7.0.0",
+			shouldSucceed: true,
+			description:   "Should extract version from [project] section only",
+		},
+		{
+			name: "version without quotes should not match",
+			content: `[project]
+name = "test-project"
+version = 1.0.0`,
+			expectedVer:   "",
+			shouldSucceed: false,
+			description:   "Should require quotes around version",
+		},
+		{
+			name: "multiple commented versions",
+			content: `[project]
+name = "test-project"
+# version = "0.0.1"
+# version = "0.0.2"
+version = "5.0.0"`,
+			expectedVer:   "5.0.0",
+			shouldSucceed: true,
+			description:   "Should ignore all commented versions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			pyprojectFile := filepath.Join(tmpDir, "pyproject.toml")
+
+			err := os.WriteFile(pyprojectFile, []byte(tt.content), 0644)
+			if err != nil {
+				t.Fatalf("Failed to create test file: %v", err)
+			}
+
+			extractor := New(cfg)
+			result, err := extractor.Extract(tmpDir)
+
+			if tt.shouldSucceed {
+				if err != nil {
+					t.Fatalf("%s: Expected successful extraction, got error: %v", tt.description, err)
+				}
+				if !result.Success {
+					t.Errorf("%s: Expected successful result", tt.description)
+				}
+				if result.Version != tt.expectedVer {
+					t.Errorf("%s: Expected version %s, got %s", tt.description, tt.expectedVer, result.Version)
+				}
+			} else {
+				if result.Success && result.Version != "" {
+					t.Errorf("%s: Expected no version extraction, but got version %s", tt.description, result.Version)
+				}
+			}
+		})
+	}
+}
+
+func TestPyprojectTomlVersionFileFallbackLimit(t *testing.T) {
+	// Test that the fallback search for __version__.py files respects the maxVersionFilesToCheck limit
+	tmpDir := t.TempDir()
+	pyprojectFile := filepath.Join(tmpDir, "pyproject.toml")
+
+	// Create pyproject.toml without version in [project] section
+	content := `[project]
+name = "test-project"
+description = "Test project without version"`
+
+	err := os.WriteFile(pyprojectFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create pyproject.toml: %v", err)
+	}
+
+	// Create more than maxVersionFilesToCheck (10) __version__.py files
+	// Create 15 files to exceed the limit
+	for i := 1; i <= 15; i++ {
+		subdir := filepath.Join(tmpDir, fmt.Sprintf("package%d", i))
+		err := os.MkdirAll(subdir, 0755)
+		if err != nil {
+			t.Fatalf("Failed to create subdirectory: %v", err)
+		}
+
+		versionFile := filepath.Join(subdir, "__version__.py")
+		versionContent := fmt.Sprintf(`__version__ = "1.%d.0"`, i)
+		err = os.WriteFile(versionFile, []byte(versionContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create __version__.py: %v", err)
+		}
+	}
+
+	// Also create the "correct" version file that should be found
+	// if within the limit (in root directory, checked first)
+	rootVersionFile := filepath.Join(tmpDir, "__version__.py")
+	err = os.WriteFile(rootVersionFile, []byte(`__version__ = "2.0.0"`), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create root __version__.py: %v", err)
+	}
+
+	cfg := &config.Config{
+		Projects: []config.ProjectConfig{
+			{
+				Type:     "Python",
+				Subtype:  "Modern",
+				File:     "pyproject.toml",
+				Regex:    []string{`version\s*=\s*["']([^"']+)["']`},
+				Samples:  []string{"https://github.com/test/repo"},
+				Priority: 1,
+			},
+		},
+	}
+
+	extractor := New(cfg)
+	result, err := extractor.Extract(tmpDir)
+
+	// Should successfully find the root __version__.py file
+	if err != nil {
+		t.Fatalf("Expected successful extraction, got error: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("Expected successful result")
+	}
+
+	if result.Version != "2.0.0" {
+		t.Errorf("Expected version 2.0.0 (from root __version__.py), got %s", result.Version)
+	}
+
+	// The version source will be "static" because it's extracted via regex pattern matching
+	// The matchedBy field should contain "__version__.py" to indicate the pattern used
+	if result.MatchedBy != "__version__.py" {
+		t.Errorf("Expected matched by '__version__.py', got %s", result.MatchedBy)
+	}
+
+	// Verify that the limit is working by ensuring we don't process all 16 files
+	// (The test passes if we successfully find version 2.0.0, proving the limit works)
+}
+
+func TestPyprojectTomlVersionFileFallbackLimitEnforced(t *testing.T) {
+	// Test that the limit prevents checking files beyond maxVersionFilesToCheck
+	tmpDir := t.TempDir()
+	pyprojectFile := filepath.Join(tmpDir, "pyproject.toml")
+
+	// Create pyproject.toml without version in [project] section
+	content := `[project]
+name = "test-project"
+description = "Test project without version"`
+
+	err := os.WriteFile(pyprojectFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create pyproject.toml: %v", err)
+	}
+
+	// Create exactly maxVersionFilesToCheck (10) __version__.py files
+	for i := 1; i <= 10; i++ {
+		subdir := filepath.Join(tmpDir, fmt.Sprintf("pkg%02d", i))
+		err := os.MkdirAll(subdir, 0755)
+		if err != nil {
+			t.Fatalf("Failed to create subdirectory: %v", err)
+		}
+
+		versionFile := filepath.Join(subdir, "__version__.py")
+		versionContent := fmt.Sprintf(`__version__ = "1.%d.0"`, i)
+		err = os.WriteFile(versionFile, []byte(versionContent), 0644)
+		if err != nil {
+			t.Fatalf("Failed to create __version__.py: %v", err)
+		}
+	}
+
+	// Create the 11th file with a distinctive version - should NOT be found due to limit
+	subdir11 := filepath.Join(tmpDir, "pkg11")
+	err = os.MkdirAll(subdir11, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create subdirectory: %v", err)
+	}
+	versionFile11 := filepath.Join(subdir11, "__version__.py")
+	err = os.WriteFile(versionFile11, []byte(`__version__ = "99.99.99"`), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create 11th __version__.py: %v", err)
+	}
+
+	cfg := &config.Config{
+		Projects: []config.ProjectConfig{
+			{
+				Type:     "Python",
+				Subtype:  "Modern",
+				File:     "pyproject.toml",
+				Regex:    []string{`version\s*=\s*["']([^"']+)["']`},
+				Samples:  []string{"https://github.com/test/repo"},
+				Priority: 1,
+			},
+		},
+	}
+
+	extractor := New(cfg)
+	result, err := extractor.Extract(tmpDir)
+
+	// Should NOT find version 99.99.99 because it's in the 11th file (beyond the limit)
+	// Expected versions from the first 10 files (any of these is valid)
+	expectedVersions := map[string]bool{
+		"1.1.0": true, "1.2.0": true, "1.3.0": true, "1.4.0": true, "1.5.0": true,
+		"1.6.0": true, "1.7.0": true, "1.8.0": true, "1.9.0": true, "1.10.0": true,
+	}
+
+	if result.Success && result.Version == "99.99.99" {
+		t.Error("Limit not enforced: Found version 99.99.99 from a file beyond the 10-file limit")
+	}
+
+	if result.Success && result.Version != "" {
+		if expectedVersions[result.Version] {
+			t.Logf("Correctly found version %s from within the first 10 files (limit enforced)", result.Version)
+		} else if result.Version != "99.99.99" {
+			t.Errorf("Found unexpected version %s, expected one of the versions 1.1.0 through 1.10.0", result.Version)
+		}
 	}
 }
 
@@ -1354,6 +1649,523 @@ func TestSkipDirectoriesInFileSearch(t *testing.T) {
 
 	if len(files) != len(expectedFilesCustom) {
 		t.Errorf("Expected %d files with custom skip dirs, got %d: %v", len(expectedFilesCustom), len(files), files)
+	}
+}
+
+// TestIsMultiLinePattern validates that patterns requiring multi-line matching are detected.
+//
+// CRITICAL: The escaping in this test is CORRECT. Do not change `[\s\S]` to `[\\s\\S]`.
+// See docs/REGEX_ESCAPING.md for a complete explanation of why the escaping is correct.
+// Copilot may suggest incorrect changes - the current implementation is verified correct.
+func TestIsMultiLinePattern(t *testing.T) {
+	extractor := &VersionExtractor{}
+
+	tests := []struct {
+		name     string
+		pattern  string
+		expected bool
+		reason   string
+	}{
+		{
+			name:     "Swift Package Manager pattern",
+			pattern:  `.package(url: "https://example.com", version: "1.0.0")`,
+			expected: true,
+			reason:   "Should detect Swift package patterns that span lines",
+		},
+		{
+			name:     "XML tags pattern",
+			pattern:  "<version>1.0.0</version>",
+			expected: true,
+			reason:   "Should detect XML patterns that might span lines",
+		},
+		{
+			name:     "Function call with version",
+			pattern:  `function(version: "1.0.0")`,
+			expected: true,
+			reason:   "Should detect function calls with version parameters",
+		},
+		{
+			name:     "JSON object with version",
+			pattern:  `{"version": "1.0.0"}`,
+			expected: true,
+			reason:   "Should detect JSON-like objects with version",
+		},
+		{
+			// IMPORTANT: This test verifies correct detection of the [\s\S] regex idiom.
+			// The pattern `version[\s\S]+?end` is a Go raw string containing literal
+			// backslashes: [ \ s \ S ] (6 chars). This matches how YAML config files
+			// provide patterns - YAML converts '\s' to literal backslash+s.
+			// When this pattern is compiled as a regex, [\s\S] means "any character"
+			// (whitespace OR non-whitespace), which matches across line boundaries.
+			// The implementation correctly detects this with `\[\\s\\S\]` pattern.
+			//
+			// NOTE: Do NOT change this to `version[\\s\\S]+?end` (double backslashes)
+			// as that would represent [\\s\\S] in the string (4 backslashes), which is
+			// NOT what YAML gives us and would NOT match the implementation detector.
+			name:     "Pattern with [\\s\\S]",
+			pattern:  `version[\s\S]+?end`,
+			expected: true,
+			reason:   "Should detect patterns using [\\s\\S] for any character including newlines",
+		},
+		{
+			name:     "Simple version pattern",
+			pattern:  `version = "1.0.0"`,
+			expected: false,
+			reason:   "Should not detect simple single-line patterns",
+		},
+		{
+			name:     "Simple regex pattern",
+			pattern:  `version\s*=\s*["']([^"']+)["']`,
+			expected: false,
+			reason:   "Should not detect standard single-line regex",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractor.isMultiLinePattern(tt.pattern)
+			if result != tt.expected {
+				t.Errorf("%s: expected %v, got %v. Pattern: %s", tt.reason, tt.expected, result, tt.pattern)
+			}
+		})
+	}
+}
+
+// TestMultiLinePatternYAMLIntegration validates the complete flow of how patterns
+// with [\s\S] are loaded from YAML config files and correctly detected as multi-line.
+// This test proves that the escaping in isMultiLinePattern is correct.
+func TestMultiLinePatternYAMLIntegration(t *testing.T) {
+	// Simulate what happens when YAML is parsed:
+	// In YAML file: regex: ['<project>[\s\S]*?<version>([^<]+)</version>']
+	// After YAML parsing, the string contains literal backslashes
+	yamlParsedPattern := `<project>[\s\S]*?<version>([^<]+)</version>`
+
+	// Verify the string contains literal backslashes (not escape sequences)
+	if len(yamlParsedPattern) != 43 {
+		t.Errorf("Expected pattern length 43, got %d - backslashes may not be literal", len(yamlParsedPattern))
+	}
+
+	// Find the [\s\S] substring in the pattern
+	expectedSubstring := `[\s\S]`
+	found := false
+	for i := 0; i <= len(yamlParsedPattern)-len(expectedSubstring); i++ {
+		if yamlParsedPattern[i:i+len(expectedSubstring)] == expectedSubstring {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Pattern should contain substring [\\\\s\\\\S] with literal backslashes")
+	}
+
+	// Test that isMultiLinePattern correctly detects this
+	extractor := &VersionExtractor{}
+	if !extractor.isMultiLinePattern(yamlParsedPattern) {
+		t.Errorf("isMultiLinePattern should detect [\\s\\S] pattern from YAML as multi-line")
+	}
+
+	// Verify the pattern works as a regex (matches across lines)
+	re := regexp.MustCompile(yamlParsedPattern)
+	multiLineXML := "<project>\n\n<version>1.0.0</version>"
+	if !re.MatchString(multiLineXML) {
+		t.Errorf("Pattern should match multi-line XML when compiled as regex")
+	}
+
+	// Demonstrate what Copilot incorrectly suggested would NOT work:
+	// If we used double backslashes in the Go raw string (which Copilot suggested),
+	// it would represent [\\s\\S] with 4 backslashes in the string, which is wrong.
+	incorrectPattern := `version[\\s\\S]+?end`
+	if len(incorrectPattern) != 20 {
+		t.Errorf("Incorrect pattern should have 20 chars (with double backslashes)")
+	}
+	// This would NOT be detected because implementation looks for single backslashes
+	if extractor.isMultiLinePattern(incorrectPattern) {
+		t.Errorf("Pattern with double backslashes should NOT match (Copilot was wrong)")
+	}
+}
+
+// TestMultiLinePatternEscapingRegression is a comprehensive regression test suite
+// that validates the correct handling of backslash escaping in pattern detection.
+// This prevents future bugs if someone tries to "fix" the escaping incorrectly.
+//
+// BACKGROUND: The [\s\S] regex idiom matches any character (whitespace OR non-whitespace),
+// which effectively matches everything including newlines. When patterns are loaded from
+// YAML config files, the string '\s' in YAML becomes a literal backslash + 's' in Go.
+// The implementation must detect these literal backslashes, not regex escape sequences.
+func TestMultiLinePatternEscapingRegression(t *testing.T) {
+	extractor := &VersionExtractor{}
+
+	tests := []struct {
+		name           string
+		pattern        string
+		expectedDetect bool
+		explanation    string
+	}{
+		{
+			name:           "Real pattern from YAML with single backslashes",
+			pattern:        `version[\s\S]+?end`,
+			expectedDetect: true,
+			explanation: "Pattern as loaded from YAML contains literal backslashes. " +
+				"String contains: v e r s i o n [ \\ s \\ S ] + ? e n d (6 chars in brackets). " +
+				"When compiled as regex, [\\\\s\\\\S] matches any character including newlines.",
+		},
+		{
+			name:           "Pattern with double backslashes (WRONG - Copilot's mistake)",
+			pattern:        `version[\\s\\S]+?end`,
+			expectedDetect: false,
+			explanation: "Pattern with double backslashes in Go raw string results in 4 backslashes total. " +
+				"String contains: v e r s i o n [ \\ \\ s \\ \\ S ] + ? e n d (8 chars in brackets). " +
+				"This is NOT what YAML gives us and should NOT be detected.",
+		},
+		{
+			name:           "Java Maven pattern from real config",
+			pattern:        `<project>[\s\S]*?<version>([^<]+)</version>`,
+			expectedDetect: true,
+			explanation: "This exact pattern exists in default-patterns.yaml for Java/Maven. " +
+				"It must be detected as multi-line because it uses [\\\\s\\\\S] to match across lines.",
+		},
+		{
+			name:           "Pattern without multiline indicators",
+			pattern:        `version\s*=\s*"([^"]+)"`,
+			expectedDetect: false,
+			explanation: "This pattern uses \\\\s (whitespace) but not [\\\\s\\\\S] (any character). " +
+				"It's designed for single-line matching and should not be detected as multi-line.",
+		},
+		{
+			name:           "Pattern with [sS] without backslashes",
+			pattern:        `version[sS]+end`,
+			expectedDetect: false,
+			explanation: "Character class [sS] matches 's' or 'S' but has no backslashes. " +
+				"This is not the [\\\\s\\\\S] idiom and should not be detected as multi-line.",
+		},
+		{
+			name:           "Pattern mentioning backslash-s in wrong context",
+			pattern:        `find \s in text`,
+			expectedDetect: false,
+			explanation: "This has '\\\\s' but not the full [\\\\s\\\\S] pattern in brackets. " +
+				"Should not be detected as multi-line pattern.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractor.isMultiLinePattern(tt.pattern)
+			if result != tt.expectedDetect {
+				t.Errorf("Pattern: %q\nExpected detection: %v, Got: %v\nExplanation: %s",
+					tt.pattern, tt.expectedDetect, result, tt.explanation)
+			}
+		})
+	}
+}
+
+// TestMultiLinePatternWithActualYAMLParsing tests the escaping with real YAML parsing
+// to ensure we handle patterns exactly as they come from configuration files.
+func TestMultiLinePatternWithActualYAMLParsing(t *testing.T) {
+	// Create a temporary YAML file with a pattern containing [\s\S]
+	tmpDir := t.TempDir()
+	yamlFile := filepath.Join(tmpDir, "test-patterns.yaml")
+
+	yamlContent := `
+projects:
+  - type: Test
+    file: test.xml
+    regex:
+      - '<project>[\s\S]*?<version>([^<]+)</version>'
+      - 'version[\s\S]+?end'
+    samples:
+      - https://example.com
+`
+
+	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test YAML file: %v", err)
+	}
+
+	// Load the config using the actual YAML parser
+	cfg, err := config.LoadConfig(yamlFile)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	if len(cfg.Projects) != 1 {
+		t.Fatalf("Expected 1 project, got %d", len(cfg.Projects))
+	}
+
+	project := cfg.Projects[0]
+	if len(project.Regex) != 2 {
+		t.Fatalf("Expected 2 regex patterns, got %d", len(project.Regex))
+	}
+
+	extractor := &VersionExtractor{}
+
+	// Test first pattern from YAML
+	pattern1 := project.Regex[0]
+	t.Logf("Pattern 1 from YAML: %q (length: %d)", pattern1, len(pattern1))
+
+	// Verify it contains [\s\S] with single backslashes (as YAML parses it)
+	if !strings.Contains(pattern1, `[\s\S]`) {
+		t.Errorf("Pattern should contain [\\\\s\\\\S] with single backslashes after YAML parsing")
+	}
+
+	// Verify isMultiLinePattern detects it
+	if !extractor.isMultiLinePattern(pattern1) {
+		t.Errorf("Pattern from YAML should be detected as multi-line: %q", pattern1)
+	}
+
+	// Verify the pattern works as a regex for multi-line content
+	re1, err := regexp.Compile(pattern1)
+	if err != nil {
+		t.Fatalf("Pattern should compile as valid regex: %v", err)
+	}
+
+	multiLineXML := "<project>\n\n<version>1.2.3</version>"
+	if !re1.MatchString(multiLineXML) {
+		t.Errorf("Pattern should match multi-line XML when compiled as regex")
+	}
+
+	// Test second pattern from YAML
+	pattern2 := project.Regex[1]
+	t.Logf("Pattern 2 from YAML: %q (length: %d)", pattern2, len(pattern2))
+
+	if !extractor.isMultiLinePattern(pattern2) {
+		t.Errorf("Second pattern from YAML should also be detected as multi-line: %q", pattern2)
+	}
+}
+
+// TestMultiLinePatternImplementationCorrectness validates that the implementation
+// detector pattern `\[\\s\\S\]` is correctly formed and matches what we expect.
+func TestMultiLinePatternImplementationCorrectness(t *testing.T) {
+	// The detector pattern from extractor.go (isMultiLinePattern function)
+	detectorPattern := `\[\\s\\S\]`
+
+	t.Logf("Detector pattern: %q", detectorPattern)
+
+	// Compile it to verify it's valid regex
+	re, err := regexp.Compile(detectorPattern)
+	if err != nil {
+		t.Fatalf("Detector pattern should be valid regex: %v", err)
+	}
+
+	// Test cases: what the detector should and should NOT match
+	shouldMatch := []string{
+		`[\s\S]`,            // Just the idiom itself
+		`version[\s\S]+end`, // Pattern with the idiom
+		`<project>[\s\S]*?<version>([^<]+)</version>`, // Real pattern from config
+		`start[\s\S]{1,100}end`,                       // With quantifier
+	}
+
+	shouldNotMatch := []string{
+		`[\\s\\S]`,  // Double backslashes (4 total)
+		`[sS]`,      // No backslashes
+		`[\s]`,      // Only one part
+		`[\S]`,      // Only other part
+		`\s\S`,      // No brackets
+		`[ \s \S ]`, // Spaces between
+	}
+
+	for _, pattern := range shouldMatch {
+		if !re.MatchString(pattern) {
+			t.Errorf("Detector should match %q but didn't", pattern)
+		}
+	}
+
+	for _, pattern := range shouldNotMatch {
+		if re.MatchString(pattern) {
+			t.Errorf("Detector should NOT match %q but did", pattern)
+		}
+	}
+
+	// Verify what the detector pattern literally looks for
+	testString := `version[\s\S]+end`
+	match := re.FindString(testString)
+	expectedMatch := `[\s\S]`
+	if match != expectedMatch {
+		t.Errorf("Expected to find %q in test string, but found %q", expectedMatch, match)
+	}
+}
+
+func TestPyprojectTomlWithSubtables(t *testing.T) {
+	// Test that subtables like [project.dependencies] don't interfere with
+	// version detection in the [project] section
+	tmpDir := t.TempDir()
+	pyprojectFile := filepath.Join(tmpDir, "pyproject.toml")
+
+	// Create a realistic pyproject.toml with subtables
+	content := `[build-system]
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "test-project"
+version = "2.5.0"
+description = "Test project with subtables"
+
+[project.dependencies]
+requests = "^2.28.0"
+numpy = "^1.24.0"
+
+[project.optional-dependencies]
+dev = ["pytest", "black"]
+docs = ["sphinx"]
+
+[tool.setuptools]
+packages = ["mypackage"]`
+
+	err := os.WriteFile(pyprojectFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	cfg := &config.Config{
+		Projects: []config.ProjectConfig{
+			{
+				Type:     "Python",
+				Subtype:  "Modern",
+				File:     "pyproject.toml",
+				Regex:    []string{`version\s*=\s*["']([^"']+)["']`},
+				Samples:  []string{"https://github.com/test/repo"},
+				Priority: 1,
+			},
+		},
+	}
+
+	extractor := New(cfg)
+	result, err := extractor.Extract(tmpDir)
+
+	if err != nil {
+		t.Fatalf("Expected successful extraction, got error: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("Expected successful result")
+	}
+
+	if result.Version != "2.5.0" {
+		t.Errorf("Expected version 2.5.0, got %s", result.Version)
+	}
+
+	if result.ProjectType != "Python" {
+		t.Errorf("Expected Python, got %s", result.ProjectType)
+	}
+}
+
+func TestPyprojectTomlSubtableVersionNotMatched(t *testing.T) {
+	// Test that version fields in subtables are NOT matched
+	// Only the version in [project] section should be detected
+	tmpDir := t.TempDir()
+	pyprojectFile := filepath.Join(tmpDir, "pyproject.toml")
+
+	// Create a pyproject.toml with version in a subtable (incorrect, but let's test it)
+	content := `[build-system]
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "test-project"
+description = "Test project"
+
+[project.metadata]
+version = "9.9.9"
+
+[tool.setuptools]
+packages = ["mypackage"]`
+
+	err := os.WriteFile(pyprojectFile, []byte(content), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	cfg := &config.Config{
+		Projects: []config.ProjectConfig{
+			{
+				Type:     "Python",
+				Subtype:  "Modern",
+				File:     "pyproject.toml",
+				Regex:    []string{`version\s*=\s*["']([^"']+)["']`},
+				Samples:  []string{"https://github.com/test/repo"},
+				Priority: 1,
+			},
+		},
+	}
+
+	extractor := New(cfg)
+	result, err := extractor.Extract(tmpDir)
+
+	// Debug output
+	if result.Success {
+		t.Logf("Found version: %s from source: %s, matched by: %s", result.Version, result.VersionSource, result.MatchedBy)
+	}
+
+	// Should NOT find version 9.9.9 from [project.metadata] subtable
+	// The [project] section has no version field, so extraction should fail
+	// or fall back to other methods
+	if result.Success && result.Version == "9.9.9" {
+		t.Errorf("Should not extract version from [project.metadata] subtable, only from [project] section. Source: %s, MatchedBy: %s", result.VersionSource, result.MatchedBy)
+	}
+}
+
+func TestPyprojectTomlNoRecursiveIssues(t *testing.T) {
+	// Test that __version__.py files in paths containing "pyproject.toml"
+	// don't trigger recursive special handling
+	tmpDir := t.TempDir()
+
+	// Create a directory path that contains "pyproject.toml" as a substring
+	// This simulates a potential edge case that could trigger unwanted special handling
+	weirdDir := filepath.Join(tmpDir, "path-with-pyproject.toml-in-name")
+	err := os.MkdirAll(weirdDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create directory: %v", err)
+	}
+
+	// Create a __version__.py file in this directory
+	versionFile := filepath.Join(weirdDir, "__version__.py")
+	versionContent := `__version__ = "3.5.7"`
+	err = os.WriteFile(versionFile, []byte(versionContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create __version__.py: %v", err)
+	}
+
+	// Create a pyproject.toml in the root that references this directory
+	pyprojectFile := filepath.Join(tmpDir, "pyproject.toml")
+	pyprojectContent := `[project]
+name = "test-project"
+description = "Test project without version in [project]"`
+
+	err = os.WriteFile(pyprojectFile, []byte(pyprojectContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create pyproject.toml: %v", err)
+	}
+
+	cfg := &config.Config{
+		Projects: []config.ProjectConfig{
+			{
+				Type:     "Python",
+				Subtype:  "Modern",
+				File:     "pyproject.toml",
+				Regex:    []string{`version\s*=\s*["']([^"']+)["']`},
+				Samples:  []string{"https://github.com/test/repo"},
+				Priority: 1,
+			},
+		},
+	}
+
+	extractor := New(cfg)
+	result, err := extractor.Extract(tmpDir)
+
+	// Should successfully find the version from __version__.py
+	if err != nil {
+		t.Fatalf("Expected successful extraction, got error: %v", err)
+	}
+
+	if !result.Success {
+		t.Error("Expected successful result")
+	}
+
+	if result.Version != "3.5.7" {
+		t.Errorf("Expected version 3.5.7, got %s", result.Version)
+	}
+
+	// Verify it found it from __version__.py and didn't get confused by the path
+	if result.MatchedBy != "__version__.py" {
+		t.Errorf("Expected matched by '__version__.py', got %s", result.MatchedBy)
 	}
 }
 

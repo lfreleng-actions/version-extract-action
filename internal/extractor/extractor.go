@@ -17,11 +17,16 @@ import (
 
 // Version validation patterns
 const (
-	// Basic semantic version pattern (max 4 components)
-	semverPattern = `^v?[0-9]+(\.[0-9]+){0,3}(\-[0-9A-Za-z\-\.]+)?(\+[0-9A-Za-z\-\.]+)?$`
+	// Official Semantic Versioning pattern from semver.org (used by tag-validate-action)
+	// Matches: MAJOR.MINOR.PATCH with optional pre-release and build metadata
+	// Examples: 1.2.3, 1.0.0-alpha, 1.0.0-alpha.1, 1.0.0+build.123
+	semverPattern = `^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`
+	// Python-style versions with dot separator (e.g., 3.2.0.dev, 1.0.0.alpha1)
+	// Not strict semver but commonly used in Python ecosystem
+	pythonStylePattern = `^[0-9]+\.[0-9]+\.[0-9]+\.[a-zA-Z][0-9a-zA-Z]*$`
 	// Simple version patterns (numbers and dots, max 4 components)
 	simplePattern = `^[0-9]+(\.[0-9]+){0,3}$`
-	// Date-based versions
+	// Date-based versions (CalVer)
 	datePattern = `^[0-9]{4}(\.[0-9]{2})*$`
 )
 
@@ -29,6 +34,8 @@ const (
 const (
 	// Maximum file size to process (10MB) to prevent memory exhaustion
 	maxFileSizeLimit = 10 * 1024 * 1024
+	// Maximum number of __version__.py files to check in fallback search
+	maxVersionFilesToCheck = 10
 )
 
 // defaultSkipDirectories defines common directories to skip during file search
@@ -195,6 +202,38 @@ func (e *VersionExtractor) extractFromDirectory(searchPath string) (*ExtractResu
 func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 	project config.ProjectConfig) (*ExtractResult, error) {
 
+	// Skip projects with empty regex patterns - they should use git tags
+	if len(project.Regex) == 0 {
+		// Early return if dynamic fallback is not enabled or project doesn't support it
+		// This avoids unnecessary file system operations
+		if !e.dynamicFallback || !project.SupportsDynamicVersioning {
+			return &ExtractResult{Success: false}, nil
+		}
+
+		// Check if the project file exists (e.g., go.mod for Go projects)
+		files, err := e.findProjectFiles(searchPath, project.File)
+		if err != nil || len(files) == 0 {
+			return &ExtractResult{Success: false}, nil
+		}
+
+		// File exists but no regex patterns - use git fallback for version
+		gitResult := e.tryGitFallback(searchPath)
+		if gitResult == nil || !gitResult.Success {
+			return &ExtractResult{Success: false}, nil
+		}
+
+		return &ExtractResult{
+			Version:       gitResult.Version,
+			ProjectType:   project.Type,
+			Subtype:       project.Subtype,
+			File:          files[0],
+			MatchedBy:     "git-fallback",
+			Success:       true,
+			VersionSource: "dynamic-git-tag",
+			GitTag:        gitResult.Tag,
+		}, nil
+	}
+
 	// Find matching files
 	files, err := e.findProjectFiles(searchPath, project.File)
 	if err != nil {
@@ -317,6 +356,22 @@ func (e *VersionExtractor) findProjectFiles(searchPath,
 func (e *VersionExtractor) extractVersionFromFile(filePath string,
 	patterns []string) (string, string, error) {
 
+	// Special handling for pyproject.toml files
+	// The special handler is authoritative - don't fall back to regex patterns
+	// because they would incorrectly match versions in wrong sections
+	if strings.HasSuffix(filePath, "pyproject.toml") {
+		return e.extractFromPyprojectToml(filePath)
+	}
+
+	return e.extractVersionWithPatterns(filePath, patterns)
+}
+
+// extractVersionWithPatterns extracts version from a file using regex patterns
+// This is separated from extractVersionFromFile to avoid recursive issues when
+// called from extractFromPyprojectToml for __version__.py files
+func (e *VersionExtractor) extractVersionWithPatterns(filePath string,
+	patterns []string) (string, string, error) {
+
 	// Detect patterns that need multi-line processing
 	needsMultiLine := false
 	for _, pattern := range patterns {
@@ -333,14 +388,112 @@ func (e *VersionExtractor) extractVersionFromFile(filePath string,
 	return e.extractWithLineByLine(filePath, patterns)
 }
 
+// extractFromPyprojectToml handles pyproject.toml with section-aware parsing
+func (e *VersionExtractor) extractFromPyprojectToml(filePath string) (string, string, error) {
+	fileContent, err := fileReader.ReadFileContent(filePath, false)
+	if err != nil {
+		return "", "", err
+	}
+
+	lines := strings.Split(fileContent, "\n")
+	inProjectSection := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check for section headers
+		if strings.HasPrefix(trimmed, "[") {
+			// Only the direct [project] section should be processed, not subtables
+			// [project] = true (we want this)
+			// [project.dependencies] = false (subtable, skip)
+			// [tool.something] = false (different section, skip)
+			if trimmed == "[project]" {
+				inProjectSection = true
+			} else {
+				inProjectSection = false
+			}
+			continue
+		}
+
+		// If we're in [project] section, look for version
+		// Use regex to avoid false matches like "version_info", "versioning", or commented lines
+		if inProjectSection && !strings.HasPrefix(trimmed, "#") {
+			// Match lines like: version = "1.2.3" or version = '1.2.3'
+			re, err := getCompiledRegex(`^version\s*=\s*["']([^"']+)["']`)
+			if err != nil {
+				continue
+			}
+			matches := re.FindStringSubmatch(trimmed)
+			if len(matches) == 2 {
+				version := matches[1]
+				if version != "" && e.isValidVersion(version) {
+					return version, "[project] section version", nil
+				}
+			}
+		}
+	}
+
+	// If no version found in [project] section, try to find __version__.py files
+	// Limit search to prevent performance issues in large projects
+	projectDir := filepath.Dir(filePath)
+	versionFiles := []string{
+		filepath.Join(projectDir, "__version__.py"),
+		filepath.Join(projectDir, "src", "*", "__version__.py"),
+		filepath.Join(projectDir, "*", "__version__.py"),
+	}
+
+	filesChecked := 0
+	for _, pattern := range versionFiles {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, versionFile := range matches {
+			// Enforce maximum files to check to prevent performance issues
+			if filesChecked >= maxVersionFilesToCheck {
+				break
+			}
+			filesChecked++
+
+			// Use extractVersionWithPatterns to avoid triggering pyproject.toml special handling
+			// if the path happens to contain "pyproject.toml" as a substring
+			if version, _, err := e.extractVersionWithPatterns(versionFile, []string{`__version__\s*=\s*["']([^"']+)["']`}); err == nil && version != "" {
+				return version, "__version__.py", nil
+			}
+		}
+		// Break outer loop if limit reached
+		if filesChecked >= maxVersionFilesToCheck {
+			break
+		}
+	}
+
+	return "", "", nil
+}
+
 // Check if a pattern likely needs multi-line matching
 func (e *VersionExtractor) isMultiLinePattern(pattern string) bool {
 	// Patterns that commonly span multiple lines
+	//
+	// IMPORTANT: Understanding the escaping in the [\s\S] detector:
+	// - User patterns come from YAML config files like: '<project>[\s\S]*?<version>'
+	// - YAML string parsing converts \s to literal backslash + s (not whitespace escape)
+	// - So the Go string contains: [ \ s \ S ] (6 characters with literal backslashes)
+	// - To detect this with regex, we need `\[\\s\\S\]` which means:
+	//   - \[ = match literal [
+	//   - \\s = match literal backslash followed by literal s
+	//   - \\S = match literal backslash followed by literal S
+	//   - \] = match literal ]
+	// - This correctly identifies patterns that use the [\s\S] regex idiom for
+	//   matching any character including newlines (whitespace OR non-whitespace)
+	//
+	// NOTE: Do NOT use `\[\s\S\]` (single backslash before s/S) as that would
+	// look for regex escape sequences, not literal backslashes in the string.
 	multiLineIndicators := []string{
 		`\.package\(.*version`,  // Swift Package Manager dependencies
 		`<[^>]*>.*<[^>]*>`,      // XML tags that might span lines
 		`\([^)]*version[^)]*\)`, // Function calls with version parameters
 		`\{[^}]*version[^}]*\}`, // JSON-like objects with version
+		`\[\\s\\S\]`,            // Patterns using [\s\S] for any character including newlines
 	}
 
 	for _, indicator := range multiLineIndicators {
@@ -466,8 +619,14 @@ func (e *VersionExtractor) isValidVersion(version string) bool {
 		return false
 	}
 
-	// Validate against semantic version pattern
+	// Validate against official semantic version pattern (from semver.org)
 	matched, _ := regexp.MatchString(semverPattern, version)
+	if matched {
+		return true
+	}
+
+	// Validate against Python-style versions (e.g., 3.2.0.dev)
+	matched, _ = regexp.MatchString(pythonStylePattern, version)
 	if matched {
 		return true
 	}
@@ -478,7 +637,7 @@ func (e *VersionExtractor) isValidVersion(version string) bool {
 		return true
 	}
 
-	// Validate against date-based version pattern
+	// Validate against date-based version pattern (CalVer)
 	matched, _ = regexp.MatchString(datePattern, version)
 	return matched
 }
@@ -613,6 +772,18 @@ func (e *VersionExtractor) detectDynamicVersioning(filePath string, indicators [
 					} else if compiledRegex.MatchString(fileContent) {
 						return true, nil
 					}
+				}
+
+				// Pattern 8: Generic pattern for SBT and other formats
+				// Matches lines where the field name and value appear on the same line
+				// Example: ThisBuild / version := dynverGitDescribeOutput.value
+				// Note: Field requires word boundary, but value doesn't (can be part of identifier)
+				genericLinePattern := fmt.Sprintf(`(?m).*\b%s\b.*%s.*`,
+					regexp.QuoteMeta(indicator.Field), regexp.QuoteMeta(value))
+				if compiledRegex, err := getCompiledRegex(genericLinePattern); err != nil {
+					return false, err
+				} else if compiledRegex.MatchString(fileContent) {
+					return true, nil
 				}
 			}
 		}

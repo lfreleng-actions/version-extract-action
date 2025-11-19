@@ -22,10 +22,14 @@ type DynamicVersionIndicator struct {
 
 // ProjectConfig represents a single project type configuration
 type ProjectConfig struct {
-	Type                      string                    `yaml:"type" validate:"required"`
-	Subtype                   string                    `yaml:"subtype,omitempty"`
-	File                      string                    `yaml:"file" validate:"required"`
-	Regex                     []string                  `yaml:"regex" validate:"required,min=1"`
+	Type    string `yaml:"type" validate:"required"`
+	Subtype string `yaml:"subtype,omitempty"`
+	File    string `yaml:"file" validate:"required"`
+	// Regex patterns for version extraction. No struct validation tags because
+	// empty arrays are allowed for projects with SupportsDynamicVersioning=true
+	// (e.g., Go projects that use git tags). Runtime validation in validateConfig()
+	// enforces that non-dynamic projects must have at least one regex pattern.
+	Regex                     []string                  `yaml:"regex"`
 	Samples                   []string                  `yaml:"samples" validate:"required,min=1"`
 	Priority                  int                       `yaml:"priority,omitempty"`
 	Notes                     string                    `yaml:"notes,omitempty"`
@@ -91,9 +95,13 @@ func validateConfig(config *Config) error {
 			continue
 		}
 		if len(project.Regex) == 0 {
-			fmt.Fprintf(os.Stderr, "Warning: Project %s missing regex patterns, "+
-				"skipping\n", project.Type)
-			continue
+			// Allow empty regex for projects that support dynamic versioning
+			// (e.g., Go projects that rely on git tags)
+			if !project.SupportsDynamicVersioning {
+				fmt.Fprintf(os.Stderr, "Warning: Project %s missing regex patterns, "+
+					"skipping\n", project.Type)
+				continue
+			}
 		}
 		if len(project.Samples) == 0 {
 			fmt.Fprintf(os.Stderr, "Warning: Project %s missing sample URLs, "+
