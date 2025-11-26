@@ -59,15 +59,15 @@ steps:
 
 <!-- markdownlint-disable MD013 -->
 
-| Name          | Required | Default | Description                                    |
-|---------------|----------|---------|------------------------------------------------|
-| path          | false    | "."     | Path to search for project files or path to a specific file |
-| config        | false    | ""      | Path to custom configuration file             |
-| format        | false    | "text"  | Output format (text or json)                  |
-| verbose       | false    | "false" | Enable verbose output                         |
-| fail-on-error| false    | "true"  | Fail the action if version extraction fails|
-| json_format   | false    | "pretty"| JSON output format: pretty, minimised        |
-| dynamic-fallback | false | "true" | Enable dynamic versioning fallback to Git tags |
+| Name             | Required | Default  | Description                                                 |
+|------------------|----------|----------|-------------------------------------------------------------|
+| path             | false    | "."      | Path to search for project files or path to a specific file |
+| config           | false    | ""       | Path to custom configuration file                           |
+| format           | false    | "text"   | Output format (text or json)                                |
+| verbose          | false    | "false"  | Enable verbose output                                       |
+| fail-on-error.   | false    | "true"   | Fail the action if version extraction fails                 |
+| json_format      | false    | "pretty" | JSON output format: pretty, minimised                       |
+| dynamic-fallback | false    | "true"   | Enable dynamic versioning fallback to Git tags              |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -75,14 +75,14 @@ steps:
 
 <!-- markdownlint-disable MD013 -->
 
-| Name         | Description                              |
-|--------------|------------------------------------------|
-| version      | Extracted version string                 |
-| project-type | Detected project type                    |
-| file         | File containing the extracted version    |
-| success      | Whether version extraction was successful|
+| Name           | Description                                  |
+|----------------|----------------------------------------------|
+| version        | Extracted version string                     |
+| project-type   | Detected project type                        |
+| file           | File containing the extracted version        |
+| success        | Whether version extraction was successful    |
 | version-source | Source of version: static or dynamic-git-tag |
-| git-tag      | Original Git tag when using dynamic fallback |
+| git-tag        | Original Git tag when using dynamic fallback |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -90,15 +90,15 @@ steps:
 
 <!-- markdownlint-disable MD013 -->
 
-| Flag              | Short | Default | Description                                    |
-|-------------------|-------|---------|------------------------------------------------|
-| --path            | -p    | "."     | Path to search for project files or path to a specific file |
-| --config          | -c    | ""      | Path to configuration file                     |
-| --format          | -f    | "text"  | Output format: text, json                     |
-| --verbose         | -v    | false   | Enable verbose output                         |
-| --fail-on-error  |       | true    | Exit with error code if version extraction fails |
-| --json-format     |       | "pretty"| JSON output format: pretty, minimised        |
-| --dynamic-fallback |  | true | Enable dynamic versioning fallback to Git tags |
+| Flag               | Short | Default  | Description                                                 |
+|--------------------|-------|----------|-------------------------------------------------------------|
+| --path             | -p    | "."      | Path to search for project files or path to a specific file |
+| --config           | -c    | ""       | Path to configuration file                                  |
+| --format           | -f    | "text"   | Output format: text, json                                   |
+| --verbose          | -v    | false    | Enable verbose output                                       |
+| --fail-on-error    |       | true     | Exit with error code if version extraction fails            |
+| --json-format      |       | "pretty" | JSON output format: pretty, minimised                       |
+| --dynamic-fallback |       | true     | Enable dynamic versioning fallback to Git tags              |
 
 <!-- markdownlint-enable MD013 -->
 
