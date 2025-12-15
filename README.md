@@ -60,7 +60,7 @@ steps:
 <!-- markdownlint-disable MD013 -->
 
 | Name             | Required | Default  | Description                                                 |
-|------------------|----------|----------|-------------------------------------------------------------|
+| ---------------- | -------- | -------- | ----------------------------------------------------------- |
 | path             | false    | "."      | Path to search for project files or path to a specific file |
 | config           | false    | ""       | Path to custom configuration file                           |
 | format           | false    | "text"   | Output format (text or json)                                |
@@ -76,7 +76,7 @@ steps:
 <!-- markdownlint-disable MD013 -->
 
 | Name           | Description                                  |
-|----------------|----------------------------------------------|
+| -------------- | -------------------------------------------- |
 | version        | Extracted version string                     |
 | project-type   | Detected project type                        |
 | file           | File containing the extracted version        |
@@ -91,7 +91,7 @@ steps:
 <!-- markdownlint-disable MD013 -->
 
 | Flag               | Short | Default  | Description                                                 |
-|--------------------|-------|----------|-------------------------------------------------------------|
+| ------------------ | ----- | -------- | ----------------------------------------------------------- |
 | --path             | -p    | "."      | Path to search for project files or path to a specific file |
 | --config           | -c    | ""       | Path to configuration file                                  |
 | --format           | -f    | "text"   | Output format: text, json                                   |
