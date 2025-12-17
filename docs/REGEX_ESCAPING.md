@@ -85,7 +85,8 @@ pattern: `version[\\s\\S]+?end`  // WRONG!
 
 ### Why This Is Wrong
 
-The double-backslash version (`[\\s\\S]`) contains **4 backslashes** in the raw string:
+The double-backslash version (`[\\s\\S]`) contains **4 backslashes** in the raw
+string:
 
 - Characters: `[`, `\`, `\`, `s`, `\`, `\`, `S`, `]`
 - This is NOT what YAML gives us
