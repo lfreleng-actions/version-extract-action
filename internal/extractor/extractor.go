@@ -80,7 +80,7 @@ type ExtractResult struct {
 	File          string `json:"file"`
 	MatchedBy     string `json:"matched_by"`
 	Success       bool   `json:"success"`
-	VersionSource string `json:"version_source,omitempty"` // "static" or "dynamic-git-tag"
+	VersionSource string `json:"version_source,omitempty"` // "static", "static-constant", or "dynamic-git-tag"
 	GitTag        string `json:"git_tag,omitempty"`        // Original git tag if dynamic
 }
 
@@ -161,18 +161,66 @@ func (e *VersionExtractor) extractFromSpecificFile(filePath string) (*ExtractRes
 	// If we found a version, use it (already cleaned and validated by extractVersionFromFile)
 	if version != "" {
 		return &ExtractResult{
-			Version:     version,
-			ProjectType: matchingProject.Type,
-			Subtype:     matchingProject.Subtype,
-			File:        filePath,
-			MatchedBy:   matchedRegex,
-			Success:     true,
+			Version:       version,
+			ProjectType:   matchingProject.Type,
+			Subtype:       matchingProject.Subtype,
+			File:          filePath,
+			MatchedBy:     matchedRegex,
+			Success:       true,
+			VersionSource: "static",
+		}, nil
+	}
+
+	// Fallback: the version may be assigned from a named Kotlin/Gradle constant
+	// (e.g. `versionName = NEWPIPE_VERSION_NAME`). Resolve it relative to the
+	// enclosing project root so buildSrc/build-logic definitions are found.
+	root := e.projectRootForFile(filePath)
+	if cv, matchedBy, cerr := e.resolveVersionConstant(filePath, root,
+		matchingProject.Regex); cerr == nil && cv != "" {
+		return &ExtractResult{
+			Version:       cv,
+			ProjectType:   matchingProject.Type,
+			Subtype:       matchingProject.Subtype,
+			File:          filePath,
+			MatchedBy:     matchedBy,
+			Success:       true,
+			VersionSource: "static-constant",
 		}, nil
 	}
 
 	return &ExtractResult{
 		Success: false,
 	}, fmt.Errorf("no valid version found in file: %s", filePath)
+}
+
+// projectRootForFile walks up from a file to find the enclosing project root,
+// identified by a Gradle/VCS marker (settings.gradle[.kts], buildSrc,
+// build-logic, or .git). The walk is bounded to 8 parent directories; if no
+// marker is found within that limit (or at all) it falls back to the file's
+// own directory, so a build script nested deeper than 8 levels may not
+// resolve its buildSrc constants. This lets constant resolution locate
+// buildSrc definitions when a specific build script (rather than a directory)
+// is passed to Extract.
+func (e *VersionExtractor) projectRootForFile(filePath string) string {
+	dir := filepath.Dir(filePath)
+	current := dir
+	markers := []string{
+		"settings.gradle", "settings.gradle.kts", "buildSrc",
+		"build-logic", ".git",
+	}
+	for i := 0; i < 8; i++ {
+		for _, marker := range markers {
+			if _, err := os.Stat(filepath.Join(current, marker)); err == nil {
+				return current
+			}
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return dir
 }
 
 // extractFromDirectory handles extraction from a directory (existing behavior)
@@ -283,6 +331,22 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 				MatchedBy:     matchedRegex,
 				Success:       true,
 				VersionSource: "static",
+			}, nil
+		}
+
+		// Fallback: the version may be assigned from a named Kotlin/Gradle
+		// constant (e.g. `versionName = NEWPIPE_VERSION_NAME`) rather than a
+		// literal. Resolve it from buildSrc and similar locations.
+		if cv, matchedBy, cerr := e.resolveVersionConstant(file,
+			searchPath, project.Regex); cerr == nil && cv != "" {
+			return &ExtractResult{
+				Version:       cv,
+				ProjectType:   project.Type,
+				Subtype:       project.Subtype,
+				File:          file,
+				MatchedBy:     matchedBy,
+				Success:       true,
+				VersionSource: "static-constant",
 			}, nil
 		}
 	}
