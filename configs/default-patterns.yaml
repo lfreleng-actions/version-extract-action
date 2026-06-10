@@ -781,7 +781,6 @@ projects:
       - 'versionCode\s*=?\s*([0-9]+)'
     samples:
       - https://github.com/signalapp/Signal-Android
-      - https://github.com/TeamNewPipe/NewPipe
       - https://github.com/mozilla-mobile/firefox-android
     priority: 44
     notes: "Android application version from build.gradle"
@@ -797,6 +796,7 @@ projects:
       - https://github.com/JetBrains/compose-multiplatform
       - https://github.com/android/compose-samples
       - https://github.com/cashapp/paparazzi
+      - https://github.com/android/nowinandroid
     priority: 45
     notes: "Android Kotlin Gradle version"
 
