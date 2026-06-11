@@ -225,9 +225,13 @@ func (e *VersionExtractor) projectRootForFile(filePath string) string {
 
 // extractFromDirectory handles extraction from a directory (existing behavior)
 func (e *VersionExtractor) extractFromDirectory(searchPath string) (*ExtractResult, error) {
+	// Index the tree once, then match every project type against it, instead
+	// of walking the whole repository separately for each project type.
+	idx := e.buildFileIndex(searchPath)
+
 	// Try each project configuration in priority order
 	for _, project := range e.config.Projects {
-		result, err := e.tryExtractFromProject(searchPath, project)
+		result, err := e.tryExtractFromProject(searchPath, project, idx)
 		if err != nil {
 			// Log error but continue to next project type
 			fmt.Fprintf(os.Stderr, "Warning: Failed to extract from %s: %v\n",
@@ -248,7 +252,7 @@ func (e *VersionExtractor) extractFromDirectory(searchPath string) (*ExtractResu
 // tryExtractFromProject attempts version extraction for a specific project
 // type
 func (e *VersionExtractor) tryExtractFromProject(searchPath string,
-	project config.ProjectConfig) (*ExtractResult, error) {
+	project config.ProjectConfig, idx *fileIndex) (*ExtractResult, error) {
 
 	// Skip projects with empty regex patterns - they should use git tags
 	if len(project.Regex) == 0 {
@@ -259,8 +263,8 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 		}
 
 		// Check if the project file exists (e.g., go.mod for Go projects)
-		files, err := e.findProjectFiles(searchPath, project.File)
-		if err != nil || len(files) == 0 {
+		files := idx.match(project.File)
+		if len(files) == 0 {
 			return &ExtractResult{Success: false}, nil
 		}
 
@@ -283,11 +287,7 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 	}
 
 	// Find matching files
-	files, err := e.findProjectFiles(searchPath, project.File)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find project files: %w", err)
-	}
-
+	files := idx.match(project.File)
 	if len(files) == 0 {
 		return &ExtractResult{Success: false}, nil
 	}
@@ -354,66 +354,13 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 	return &ExtractResult{Success: false}, nil
 }
 
-// findProjectFiles searches for files matching the given pattern
+// findProjectFiles returns files matching the given pattern beneath searchPath.
+// It builds a one-off fileIndex, so callers that match many patterns over the
+// same tree should build a fileIndex once and call match directly (as
+// extractFromDirectory does) rather than calling this per pattern.
 func (e *VersionExtractor) findProjectFiles(searchPath,
 	pattern string) ([]string, error) {
-
-	var matchingFiles []string
-
-	// Handle glob patterns
-	if strings.Contains(pattern, "*") {
-		matches, err := filepath.Glob(filepath.Join(searchPath, pattern))
-		if err != nil {
-			return nil, fmt.Errorf("glob pattern error: %w", err)
-		}
-		matchingFiles = append(matchingFiles, matches...)
-	} else {
-		// Direct file path
-		filePath := filepath.Join(searchPath, pattern)
-		if _, err := os.Stat(filePath); err == nil {
-			matchingFiles = append(matchingFiles, filePath)
-		}
-	}
-
-	// Also search in subdirectories for common locations
-	err := filepath.Walk(searchPath, func(path string,
-		info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Continue walking despite errors
-		}
-
-		// Skip hidden directories and common build/cache directories
-		if info.IsDir() && strings.HasPrefix(info.Name(), ".") {
-			return filepath.SkipDir
-		}
-		if info.IsDir() {
-			for _, skipDir := range e.skipDirectories {
-				if info.Name() == skipDir {
-					return filepath.SkipDir
-				}
-			}
-		}
-
-		// Check if file matches pattern
-		if !info.IsDir() {
-			if strings.Contains(pattern, "*") {
-				matched, _ := filepath.Match(pattern, info.Name())
-				if matched {
-					matchingFiles = append(matchingFiles, path)
-				}
-			} else if info.Name() == pattern {
-				matchingFiles = append(matchingFiles, path)
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return matchingFiles, fmt.Errorf("error walking directory: %w", err)
-	}
-
-	return e.removeDuplicates(matchingFiles), nil
+	return e.buildFileIndex(searchPath).match(pattern), nil
 }
 
 // extractVersionFromFile attempts to extract version using regex patterns
@@ -860,11 +807,9 @@ func (e *VersionExtractor) detectDynamicVersioning(filePath string, indicators [
 func (e *VersionExtractor) tryGitFallback(searchPath string) *git.GitTagResult {
 	gitExtractor := git.New(searchPath)
 
-	// Try to fetch tags first (useful in CI environments)
-	// Don't treat fetch failures as fatal
-	gitExtractor.FetchTags()
-
-	// Get the latest version tag
+	// Get the latest version tag. Local tags are tried first; if none are
+	// present (e.g. a shallow clone) the lookup falls back to `git ls-remote`,
+	// which is far cheaper than fetching tag objects over the network.
 	result, err := gitExtractor.GetLatestVersionTag()
 	if err != nil {
 		return &git.GitTagResult{
