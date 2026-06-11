@@ -4,6 +4,8 @@
 package git
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Version tag regex patterns for Git tag validation
@@ -97,6 +100,42 @@ func New(workingDir string) *GitVersionExtractor {
 	}
 }
 
+// Timeouts bound git subprocess calls so version extraction can never hang on
+// a slow or pathological repository. Local commands are quick; the remote
+// lookup (ls-remote) contacts origin for refs only (no object download).
+const (
+	gitLocalTimeout  = 15 * time.Second
+	gitRemoteTimeout = 45 * time.Second
+)
+
+// runGit runs a git command in the working directory, bounded by a timeout,
+// and returns its standard output. On failure it surfaces the git arguments,
+// the captured stderr, and distinguishes timeouts, so callers (and logs) get
+// actionable diagnostics instead of a bare "exit status 128".
+func (g *GitVersionExtractor) runGit(timeout time.Duration,
+	args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = g.workingDir
+	out, err := cmd.Output()
+	if err == nil {
+		return out, nil
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("git %s timed out after %s",
+			strings.Join(args, " "), timeout)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return out, fmt.Errorf("git %s: %w: %s",
+				strings.Join(args, " "), err, stderr)
+		}
+	}
+	return out, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+}
+
 // IsGitRepository checks if the working directory is a Git repository
 func (g *GitVersionExtractor) IsGitRepository() bool {
 	// Check if .git directory exists
@@ -106,9 +145,7 @@ func (g *GitVersionExtractor) IsGitRepository() bool {
 	}
 
 	// Alternative: try git rev-parse command
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
-	cmd.Dir = g.workingDir
-	err := cmd.Run()
+	_, err := g.runGit(gitLocalTimeout, "rev-parse", "--git-dir")
 	return err == nil
 }
 
@@ -166,6 +203,14 @@ func (g *GitVersionExtractor) tryGetLatestTag() (string, string, error) {
 		return version, tag, nil
 	}
 
+	// Strategy 6: no usable local tags (e.g. a shallow clone) — list the
+	// remote's tags with ls-remote, which returns ref names only without
+	// downloading objects. This avoids the very slow `git fetch --tags` on
+	// large repositories.
+	if version, tag, err := g.getTagFromRemote(); err == nil && version != "" {
+		return version, tag, nil
+	}
+
 	return "", "", fmt.Errorf("no tags found with any strategy")
 }
 
@@ -176,9 +221,7 @@ func (g *GitVersionExtractor) getTagWithDescribe(matchPattern string) (string, s
 		args = append(args, fmt.Sprintf("--match=%s", matchPattern))
 	}
 
-	cmd := exec.Command("git", args...)
-	cmd.Dir = g.workingDir
-	output, err := cmd.Output()
+	output, err := g.runGit(gitLocalTimeout, args...)
 	if err != nil {
 		return "", "", err
 	}
@@ -194,9 +237,8 @@ func (g *GitVersionExtractor) getTagWithDescribe(matchPattern string) (string, s
 
 // getTagWithList uses git tag --list with sorting to get the latest tag
 func (g *GitVersionExtractor) getTagWithList() (string, string, error) {
-	cmd := exec.Command("git", "tag", "--list", "--sort=-version:refname")
-	cmd.Dir = g.workingDir
-	output, err := cmd.Output()
+	output, err := g.runGit(gitLocalTimeout, "tag", "--list",
+		"--sort=-version:refname")
 	if err != nil {
 		return "", "", err
 	}
@@ -220,6 +262,40 @@ func (g *GitVersionExtractor) getTagWithList() (string, string, error) {
 	}
 
 	return "", "", fmt.Errorf("no valid version tags found")
+}
+
+// getTagFromRemote lists the origin's tags via `git ls-remote` (ref names
+// only, no object download) and returns the highest-sorted valid version tag.
+// This is dramatically cheaper than `git fetch --tags` on large repositories,
+// where fetching tag objects onto a shallow clone can take many minutes.
+func (g *GitVersionExtractor) getTagFromRemote() (string, string, error) {
+	output, err := g.runGit(gitRemoteTimeout, "ls-remote", "--tags",
+		"--sort=-version:refname", "origin")
+	if err != nil {
+		return "", "", err
+	}
+
+	const marker = "refs/tags/"
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(string(output), "\n") {
+		i := strings.Index(line, marker)
+		if i < 0 {
+			continue
+		}
+		// Strip the peeled-tag suffix ls-remote emits for annotated tags.
+		tag := strings.TrimSuffix(strings.TrimSpace(line[i+len(marker):]), "^{}")
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+
+		version := g.cleanVersionFromTag(tag)
+		if g.isValidVersionTag(version) {
+			return version, tag, nil
+		}
+	}
+
+	return "", "", fmt.Errorf("no valid version tags found on remote")
 }
 
 // cleanVersionFromTag extracts version from a git tag
@@ -265,10 +341,10 @@ func (g *GitVersionExtractor) FetchTags() error {
 		return fmt.Errorf("not a git repository")
 	}
 
-	// Try to fetch tags quietly
-	cmd := exec.Command("git", "fetch", "--tags", "--quiet")
-	cmd.Dir = g.workingDir
-	err := cmd.Run()
+	// Try to fetch tags quietly, bounded by a timeout. The default extraction
+	// path now prefers getTagFromRemote (ls-remote), which is far cheaper than
+	// fetching tag objects on large repositories.
+	_, err := g.runGit(gitRemoteTimeout, "fetch", "--tags", "--quiet")
 
 	// Don't treat fetch failures as fatal - repository might be offline
 	// or user might not have network access

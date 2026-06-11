@@ -202,6 +202,61 @@ func TestGetLatestVersionTag_WithGitRepo(t *testing.T) {
 	}
 }
 
+func TestGetLatestVersionTag_RemoteFallback(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available, skipping integration test")
+	}
+
+	base, err := os.MkdirTemp("", "git-remote-fallback-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(base)
+
+	remote := filepath.Join(base, "remote.git")
+	work := filepath.Join(base, "work")
+
+	// A bare "remote" plus a working clone whose origin points at it.
+	if err := runGitCommand(base, "init", "--bare", remote); err != nil {
+		t.Skipf("init bare repo: %v", err)
+	}
+	if err := runGitCommand(base, "clone", remote, work); err != nil {
+		t.Skipf("clone repo: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(work, "f.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit, tag, push the tags to the remote, then delete the local tags to
+	// simulate a shallow clone whose tags live only on the remote.
+	setup := [][]string{
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test User"},
+		{"add", "f.txt"},
+		{"commit", "-m", "init"},
+		{"tag", "v2.0.0"},
+		{"tag", "v2.1.0"},
+		{"push", "origin", "--tags"},
+		{"tag", "-d", "v2.0.0"},
+		{"tag", "-d", "v2.1.0"},
+	}
+	for _, args := range setup {
+		if err := runGitCommand(work, args...); err != nil {
+			t.Skipf("git %v: %v", args, err)
+		}
+	}
+
+	// Local strategies find nothing; resolution must come from the remote.
+	result, err := New(work).GetLatestVersionTag()
+	if err != nil {
+		t.Fatalf("expected success via remote fallback, got: %v", err)
+	}
+	if result.Version != "2.1.0" {
+		t.Errorf("expected version 2.1.0 from remote tags, got %q", result.Version)
+	}
+}
+
 func TestFetchTags(t *testing.T) {
 	// Test with non-git directory
 	tempDir, err := os.MkdirTemp("", "git-test-*")
