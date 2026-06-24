@@ -86,17 +86,25 @@ runs:
     - name: "Extract project version"
       id: extract
       shell: bash
+      env:
+        INPUT_PATH: "${{ inputs.path }}"
+        INPUT_CONFIG: "${{ inputs.config }}"
+        INPUT_FORMAT: "${{ inputs.format }}"
+        INPUT_VERBOSE: "${{ inputs.verbose }}"
+        INPUT_FAIL_ON_ERROR: "${{ inputs.fail-on-error }}"
+        INPUT_JSON_FORMAT: "${{ inputs.json_format }}"
+        INPUT_DYNAMIC_FALLBACK: "${{ inputs.dynamic-fallback }}"
       run: |
         cd "${{ github.action_path }}"
 
         # Set up parameters
-        SEARCH_PATH="${{ inputs.path }}"
-        CONFIG_PATH="${{ inputs.config }}"
-        FORMAT="${{ inputs.format }}"
-        VERBOSE="${{ inputs.verbose }}"
-        FAIL_ON_ERROR="${{ inputs.fail-on-error }}"
-        JSON_FORMAT="${{ inputs.json_format }}"
-        DYNAMIC_FALLBACK="${{ inputs.dynamic-fallback }}"
+        SEARCH_PATH="$INPUT_PATH"
+        CONFIG_PATH="$INPUT_CONFIG"
+        FORMAT="$INPUT_FORMAT"
+        VERBOSE="$INPUT_VERBOSE"
+        FAIL_ON_ERROR="$INPUT_FAIL_ON_ERROR"
+        JSON_FORMAT="$INPUT_JSON_FORMAT"
+        DYNAMIC_FALLBACK="$INPUT_DYNAMIC_FALLBACK"
 
         # Build command arguments using array
         ARGS=("--path=${SEARCH_PATH}" "--format=json")
