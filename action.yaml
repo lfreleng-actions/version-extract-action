@@ -76,8 +76,10 @@ runs:
 
     - name: "Build version extract"
       shell: bash
+      env:
+        ACTION_PATH: "${{ github.action_path }}"
       run: |
-        cd "${{ github.action_path }}"
+        cd "$ACTION_PATH"
         echo "Building version extract..."
         go build -ldflags "-X main.version=action" \
           -o version-extract cmd/version-extract/main.go
@@ -94,8 +96,9 @@ runs:
         INPUT_FAIL_ON_ERROR: "${{ inputs.fail-on-error }}"
         INPUT_JSON_FORMAT: "${{ inputs.json_format }}"
         INPUT_DYNAMIC_FALLBACK: "${{ inputs.dynamic-fallback }}"
+        ACTION_PATH: "${{ github.action_path }}"
       run: |
-        cd "${{ github.action_path }}"
+        cd "$ACTION_PATH"
 
         # Set up parameters
         SEARCH_PATH="$INPUT_PATH"
