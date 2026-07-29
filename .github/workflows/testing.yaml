@@ -231,25 +231,30 @@ jobs:
           echo 'Validating action outputs...'
 
           # Check JavaScript results
-          if [[ "${{ steps.test-js.outputs.success }}" != "true" ]]; then
+          if [[ "${STEPS_TEST_JS_OUTPUTS_SUCCESS}" != "true" ]]; then
             echo '❌ JavaScript action test failed'
             exit 1
           fi
 
-          if [[ "${{ steps.test-js.outputs.version }}" != "1.2.3" ]]; then
+          if [[ "${STEPS_TEST_JS_OUTPUTS_VERSION}" != "1.2.3" ]]; then
             echo "❌ JavaScript version mismatch: expected 1.2.3," \
-              "got ${{ steps.test-js.outputs.version }}"
+              "got ${STEPS_TEST_JS_OUTPUTS_VERSION}"
             exit 1
           fi
 
-          if [[ "${{ steps.test-js.outputs.project-type }}" != \
+          if [[ "${STEPS_TEST_JS_OUTPUTS_PROJECT_TYPE}" != \
             "JavaScript" ]]; then
             echo "❌ JavaScript project type mismatch: expected" \
-              "JavaScript, got ${{ steps.test-js.outputs.project-type }}"
+              "JavaScript, got ${STEPS_TEST_JS_OUTPUTS_PROJECT_TYPE}"
             exit 1
           fi
 
           echo '✅ Action tests passed'
+        env:
+          STEPS_TEST_JS_OUTPUTS_SUCCESS: ${{ steps.test-js.outputs.success }}
+          STEPS_TEST_JS_OUTPUTS_VERSION: ${{ steps.test-js.outputs.version }}
+          # yamllint disable-line rule:line-length
+          STEPS_TEST_JS_OUTPUTS_PROJECT_TYPE: ${{ steps.test-js.outputs.project-type }}
 
       # Phase 7: Error Handling Tests
       - name: 'Error Handling Tests'
