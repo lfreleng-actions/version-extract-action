@@ -136,19 +136,15 @@ func runExtractor(cmd *cobra.Command, args []string) error {
 	verboseLog(fmt.Sprintf("Loading configuration from: %s", configPath))
 	verboseLog(fmt.Sprintf("Searching in path: %s", path))
 
-	// Load configuration
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
-		// Handle config loading error with proper output format
 		return handleError(fmt.Errorf("failed to load configuration: %w", err))
 	}
 
 	verboseLog(fmt.Sprintf("Loaded %d project configurations", len(cfg.Projects)))
 
-	// Create extractor
 	ext := extractor.NewWithOptions(cfg, dynamicFallback)
 
-	// Extract version
 	result, err := ext.Extract(path)
 	if err != nil {
 		if failOnError {
@@ -210,7 +206,6 @@ func listSupportedTypes(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Load configuration
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
@@ -254,7 +249,6 @@ func listSupportedTypes(cmd *cobra.Command, args []string) error {
 // outputResult formats and outputs the extraction result
 func outputResult(result *extractor.ExtractResult, extractErr error) error {
 	if outputFormat == "json" {
-		// Create JSON output structure
 		output := map[string]interface{}{
 			"success": result != nil && result.Success,
 		}
