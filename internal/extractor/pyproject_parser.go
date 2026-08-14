@@ -82,7 +82,7 @@ func (e *VersionExtractor) extractFromPyprojectToml(filePath string) (string, st
 			filesChecked++
 
 			// extractVersionWithPatterns rather than extractVersionFromFile:
-			// the latter routes anything whose path ends in "pyproject.toml"
+			// the latter routes any file whose basename is "pyproject.toml"
 			// back into the section-aware parser above.
 			if version, _, err := e.extractVersionWithPatterns(versionFile, dunderVersionPatterns); err == nil && version != "" {
 				return version, "__version__.py", nil

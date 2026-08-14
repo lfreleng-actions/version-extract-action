@@ -744,6 +744,78 @@ func TestExtractVersionFromFile(t *testing.T) {
 	}
 }
 
+// TestExtractVersionFromFilePyprojectSuffixNotMisrouted guards the
+// basename check in extractVersionFromFile. A file merely *ending* in
+// "pyproject.toml" is a different file and must go through the
+// configured regex patterns; routing it into the section-aware handler
+// would silently drop its version, because that handler only reads a
+// literal [project] section and never falls back.
+func TestExtractVersionFromFilePyprojectSuffixNotMisrouted(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// No [project] section, so the pyproject handler would find nothing.
+	content := "[metadata]\nversion = \"4.5.6\"\n"
+	patterns := []string{`version\s*=\s*["']([^"']+)["']`}
+
+	for _, name := range []string{
+		"my-pyproject.toml",
+		"old-pyproject.toml",
+		"backup.pyproject.toml",
+	} {
+		t.Run(name, func(t *testing.T) {
+			testFile := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test file: %v", err)
+			}
+
+			extractor := &VersionExtractor{}
+			version, _, err := extractor.extractVersionFromFile(testFile, patterns)
+			if err != nil {
+				t.Fatalf("Error extracting version: %v", err)
+			}
+
+			if version != "4.5.6" {
+				t.Errorf("Expected version 4.5.6 via configured patterns, got %q", version)
+			}
+		})
+	}
+}
+
+// TestExtractVersionFromFilePyprojectStillRouted is the other half of the
+// basename check: a real pyproject.toml must still reach the
+// section-aware handler, which reads only the [project] section.
+func TestExtractVersionFromFilePyprojectStillRouted(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "pyproject.toml")
+
+	// The decoy version in [tool.other] must be ignored; only the
+	// [project] value counts. A plain regex scan would match the decoy
+	// first, so this proves the section-aware handler ran.
+	content := `[tool.other]
+version = "0.0.1"
+
+[project]
+name = "demo"
+version = "7.8.9"
+`
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	extractor := &VersionExtractor{}
+	patterns := []string{`version\s*=\s*["']([^"']+)["']`}
+
+	version, _, err := extractor.extractVersionFromFile(testFile, patterns)
+	if err != nil {
+		t.Fatalf("Error extracting version: %v", err)
+	}
+
+	if version != "7.8.9" {
+		t.Errorf("Expected version 7.8.9 from [project], got %q", version)
+	}
+}
+
 func TestExtractVersionFromFileNoMatch(t *testing.T) {
 	// Create test file without version
 	tmpDir := t.TempDir()

@@ -6,6 +6,7 @@ package extractor
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -36,8 +37,10 @@ func (e *VersionExtractor) extractVersionFromFile(filePath string,
 
 	// Special handling for pyproject.toml files
 	// The special handler is authoritative - don't fall back to regex patterns
-	// because they would incorrectly match versions in wrong sections
-	if strings.HasSuffix(filePath, "pyproject.toml") {
+	// because they would incorrectly match versions in wrong sections.
+	// Match on the basename, not a suffix: "my-pyproject.toml" is a
+	// different file and must go through the configured patterns.
+	if filepath.Base(filePath) == "pyproject.toml" {
 		return e.extractFromPyprojectToml(filePath)
 	}
 
