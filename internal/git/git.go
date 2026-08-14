@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,11 +44,17 @@ const (
 	fallbackVersionPattern = `^[0-9]+\.[0-9]+\.[0-9]+$`
 )
 
-// versionTagPatterns holds pre-compiled regex patterns for version validation
-var versionTagPatterns []*regexp.Regexp
+// versionTagPatterns returns the compiled version tag patterns, compiling
+// them on first use and caching the outcome. Compilation is deferred rather
+// than done in an init function so that a malformed pattern is reported to
+// the caller as an error instead of taking the process down at package load.
+var versionTagPatterns = sync.OnceValues(compileVersionTagPatterns)
 
-// init initializes the version tag patterns with proper error handling
-func init() {
+// compileVersionTagPatterns compiles every version tag pattern, logging and
+// skipping any that are individually malformed. If that leaves nothing usable
+// it falls back to the basic semantic version pattern, and reports an error
+// when even the fallback cannot be compiled.
+func compileVersionTagPatterns() ([]*regexp.Regexp, error) {
 	patterns := []string{
 		semanticVersionPattern,
 		simpleVersionPattern,
@@ -58,26 +65,29 @@ func init() {
 		rcVersionPattern,
 	}
 
-	versionTagPatterns = make([]*regexp.Regexp, 0, len(patterns))
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
 	for _, pattern := range patterns {
 		re, err := regexp.Compile(pattern)
 		if err != nil {
 			log.Printf("warning: failed to compile version regex pattern '%s': %v", pattern, err)
 			continue
 		}
-		versionTagPatterns = append(versionTagPatterns, re)
+		compiled = append(compiled, re)
 	}
 
-	// Ensure we have at least one working pattern
-	if len(versionTagPatterns) == 0 {
-		log.Printf("error: no version regex patterns compiled successfully, using fallback pattern")
-		// Use the fallback pattern constant
-		if re, err := regexp.Compile(fallbackVersionPattern); err == nil {
-			versionTagPatterns = append(versionTagPatterns, re)
-		} else {
-			panic("critical error: even fallback regex pattern failed to compile")
-		}
+	if len(compiled) > 0 {
+		return compiled, nil
 	}
+
+	log.Printf("error: no version regex patterns compiled successfully, using fallback pattern")
+	re, err := regexp.Compile(fallbackVersionPattern)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"no usable version tag patterns: fallback pattern '%s' failed to compile: %w",
+			fallbackVersionPattern, err)
+	}
+
+	return []*regexp.Regexp{re}, nil
 }
 
 // GitTagResult represents the result of Git tag extraction
@@ -256,7 +266,11 @@ func (g *GitVersionExtractor) getTagWithList() (string, string, error) {
 		}
 
 		version := g.cleanVersionFromTag(tag)
-		if g.isValidVersionTag(version) {
+		valid, err := g.isValidVersionTag(version)
+		if err != nil {
+			return "", "", err
+		}
+		if valid {
 			return version, tag, nil
 		}
 	}
@@ -290,7 +304,11 @@ func (g *GitVersionExtractor) getTagFromRemote() (string, string, error) {
 		seen[tag] = true
 
 		version := g.cleanVersionFromTag(tag)
-		if g.isValidVersionTag(version) {
+		valid, err := g.isValidVersionTag(version)
+		if err != nil {
+			return "", "", err
+		}
+		if valid {
 			return version, tag, nil
 		}
 	}
@@ -300,14 +318,12 @@ func (g *GitVersionExtractor) getTagFromRemote() (string, string, error) {
 
 // cleanVersionFromTag extracts version from a git tag
 func (g *GitVersionExtractor) cleanVersionFromTag(tag string) string {
-	// Remove common prefixes
 	version := strings.TrimSpace(tag)
 
 	// Remove 'v' prefix if present
 	version = strings.TrimPrefix(version, "v")
 	version = strings.TrimPrefix(version, "V")
 
-	// Remove common prefixes
 	prefixes := []string{"release-", "rel-", "release/", "rel/", "version-", "ver-", "v-"}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(strings.ToLower(version), strings.ToLower(prefix)) {
@@ -319,20 +335,26 @@ func (g *GitVersionExtractor) cleanVersionFromTag(tag string) string {
 	return strings.TrimSpace(version)
 }
 
-// isValidVersionTag checks if a tag represents a valid version
-func (g *GitVersionExtractor) isValidVersionTag(version string) bool {
+// isValidVersionTag reports whether version matches any of the recognised
+// version tag shapes. It returns an error only when the patterns themselves
+// could not be compiled, which leaves no way to classify the tag.
+func (g *GitVersionExtractor) isValidVersionTag(version string) (bool, error) {
 	if version == "" {
-		return false
+		return false, nil
 	}
 
-	// Use pre-compiled regex patterns
-	for _, re := range versionTagPatterns {
+	patterns, err := versionTagPatterns()
+	if err != nil {
+		return false, err
+	}
+
+	for _, re := range patterns {
 		if re.MatchString(version) {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 // FetchTags attempts to fetch remote tags (useful in CI environments)

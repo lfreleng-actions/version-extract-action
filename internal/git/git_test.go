@@ -85,7 +85,11 @@ func TestIsValidVersionTag(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result := extractor.isValidVersionTag(test.input)
+		result, err := extractor.isValidVersionTag(test.input)
+		if err != nil {
+			t.Fatalf("isValidVersionTag(%q) returned an error: %v",
+				test.input, err)
+		}
 		if result != test.expected {
 			t.Errorf("isValidVersionTag(%q) = %t, expected %t",
 				test.input, result, test.expected)
@@ -294,15 +298,19 @@ func BenchmarkIsValidVersionTag(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		extractor.isValidVersionTag("1.2.3-beta.1")
+		_, _ = extractor.isValidVersionTag("1.2.3-beta.1")
 	}
 }
 
 func TestRegexPatternCompilation(t *testing.T) {
 	// Test that our regex patterns are properly compiled
-	// This verifies that the init() function worked correctly
-	if len(versionTagPatterns) == 0 {
-		t.Fatal("No version tag patterns were compiled, init() error handling may have failed")
+	// This verifies the lazy compilation and its error handling
+	patterns, err := versionTagPatterns()
+	if err != nil {
+		t.Fatalf("Version tag patterns failed to compile: %v", err)
+	}
+	if len(patterns) == 0 {
+		t.Fatal("No version tag patterns were compiled")
 	}
 
 	// Test that at least one pattern works correctly
@@ -321,7 +329,11 @@ func TestRegexPatternCompilation(t *testing.T) {
 
 	foundMatch := false
 	for _, version := range validVersions {
-		if extractor.isValidVersionTag(version) {
+		valid, err := extractor.isValidVersionTag(version)
+		if err != nil {
+			t.Fatalf("isValidVersionTag(%q) returned an error: %v", version, err)
+		}
+		if valid {
 			foundMatch = true
 			break
 		}

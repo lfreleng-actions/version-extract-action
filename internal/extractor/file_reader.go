@@ -47,7 +47,6 @@ func (fr *FileReader) ValidateFileSize(filePath string) error {
 
 // ReadFileContent reads the entire file content with optional normalization
 func (fr *FileReader) ReadFileContent(filePath string, normalizeContent bool) (string, error) {
-	// Validate file size first
 	if err := fr.ValidateFileSize(filePath); err != nil {
 		return "", err
 	}
@@ -72,7 +71,6 @@ func (fr *FileReader) ReadFileContent(filePath string, normalizeContent bool) (s
 // The processor function receives each line and returns (result, shouldStop)
 // If shouldStop is true, processing stops and the result is returned
 func (fr *FileReader) ProcessFileLineByLine(filePath string, processor func(string) (string, bool)) (string, error) {
-	// Validate file size first
 	if err := fr.ValidateFileSize(filePath); err != nil {
 		return "", err
 	}

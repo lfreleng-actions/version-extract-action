@@ -62,7 +62,6 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse YAML config: %w", err)
 	}
 
-	// Validate configuration
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
@@ -109,7 +108,6 @@ func validateConfig(config *Config) error {
 			continue
 		}
 
-		// Create unique key for duplicate detection
 		key := fmt.Sprintf("%s-%s-%s", project.Type, project.Subtype,
 			project.File)
 		if seenTypes[key] {
