@@ -103,12 +103,12 @@ runs:
         SEARCH_PATH="$INPUT_PATH"
         CONFIG_PATH="$INPUT_CONFIG"
         case "$SEARCH_PATH" in
-          /*) ;;
+          /* | [A-Za-z]:[\\/]* | \\\\*) ;;
           *) SEARCH_PATH="${GITHUB_WORKSPACE}/${SEARCH_PATH}" ;;
         esac
         if [ -n "$CONFIG_PATH" ]; then
           case "$CONFIG_PATH" in
-            /*) ;;
+            /* | [A-Za-z]:[\\/]* | \\\\*) ;;
             *) CONFIG_PATH="${GITHUB_WORKSPACE}/${CONFIG_PATH}" ;;
           esac
         fi
