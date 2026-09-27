@@ -219,7 +219,7 @@ jobs:
         # Simulate action execution
       - name: 'Test Action - JavaScript'
         id: test-js
-        uses: ./
+        uses: $/
         with:
           path: test-samples/javascript
           format: json
