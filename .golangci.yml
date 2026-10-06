@@ -2,225 +2,64 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-# golangci-lint configuration for project-version-action
+# golangci-lint configuration, v2 schema, adopted from actions-template.
+# Comments here record only where this repository deliberately differs.
+
+version: "2"
 
 run:
   timeout: 5m
-  issues-exit-code: 1
   tests: true
-  build-tags: []
-  skip-dirs:
-    - vendor
-    - .git
-  skip-files: []
-  modules-download-mode: readonly
-  allow-parallel-runners: true
-
-output:
-  format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-  uniq-by-line: true
-  sort-results: true
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-    ignore: fmt:.*,io/ioutil:^Read.*
-
-  govet:
-    check-shadowing: true
-    enable-all: true
-    disable:
-      - fieldalignment
-
-  gofmt:
-    simplify: true
-
-  goimports:
-    local-prefixes: github.com/lfreleng-actions/version-extract-action
-
-  golint:
-    min-confidence: 0.8
-
-  gocyclo:
-    min-complexity: 15
-
-  maligned:
-    suggest-new: true
-
-  dupl:
-    threshold: 100
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-
-  misspell:
-    locale: US
-    ignore-words: []
-
-  lll:
-    line-length: 80
-    tab-width: 1
-
-  unused:
-    check-exported: false
-
-  unparam:
-    check-exported: false
-
-  nakedret:
-    max-func-lines: 30
-
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: false
-
-  gocritic:
-    enabled-tags:
-      - performance
-      - style
-      - experimental
-    disabled-checks:
-      - wrapperFunc
-      - dupImport
-      - ifElseChain
-      - octalLiteral
-
-  funlen:
-    lines: 100
-    statements: 50
-
-  whitespace:
-    multi-if: false
-    multi-func: false
-
-  wsl:
-    strict-append: true
-    allow-assign-and-call: true
-    allow-multiline-assign: true
-    allow-cuddle-declarations: false
-    allow-trailing-comment: false
-    force-case-trailing-whitespace: 0
-
-  godox:
-    keywords:
-      - NOTE
-      - OPTIMIZE
-      - HACK
-
-  gci:
-    local-prefixes: github.com/lfreleng-actions/version-extract-action
 
 linters:
   enable:
-    # Enabled by default
     - errcheck
-    - gosimple
+    - goconst
+    - gocyclo
+    - gosec
     - govet
     - ineffassign
-    - staticcheck
-    - typecheck
-    - unused
-
-    # Additional linters
-    - asciicheck
-    - bodyclose
-    - dupl
-    - durationcheck
-    - errorlint
-    - exhaustive
-    - exportloopref
-    - forcetypeassert
-    - gochecknoinits
-    - gocognit
-    - goconst
-    - gocritic
-    - gocyclo
-    - godot
-    - gofmt
-    - goimports
-    - gomnd
-    - goprintffuncname
-    - gosec
-    - lll
-    - makezero
     - misspell
     - nakedret
-    - nilerr
-    - nolintlint
-    - prealloc
-    - predeclared
     - revive
-    - rowserrcheck
-    - sqlclosecheck
+    - staticcheck
     - unconvert
     - unparam
-    - whitespace
-    - wsl
+    - unused
 
-  disable:
-    - deadcode
-    - golint
-    - interfacer
-    - maligned
-    - scopelint
-    - structcheck
-    - varcheck
+  settings:
+    errcheck:
+      check-blank: true
+    gocyclo:
+      min-complexity: 25
+    govet:
+      enable:
+        - shadow
+    # No 'locale' (the template sets US). This project writes British
+    # English and exposes it in its interface: 'minimised' is a value of
+    # --json-format. Unset, misspell still catches typos but enforces
+    # neither spelling; 'UK' would instead flag Go and Git terms such as
+    # 'Initialize' and 'normalize'.
+    misspell: {}
+    gosec:
+      excludes:
+        - G104
+
+  exclusions:
+    rules:
+      # goconst is excluded from tests as well as gosec: test tables repeat
+      # literal fixtures and expected values ("1.2.3", "static") on
+      # purpose, and naming them would obscure what each case asserts.
+      - path: "_test\\.go$"
+        linters:
+          - gosec
+          - goconst
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-        - funlen
-        - goconst
-        - gocognit
-        - gomnd
-        - lll
-
-    # Exclude some linters from running on generated files
-    - path: ".*\\.pb\\.go"
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-
-    # Exclude lll issues for long lines with go:generate
-    - linters:
-        - lll
-      source: "^//go:generate "
-
-    # Exclude certain issues in main.go
-    - path: cmd/version-extract/main\.go
-      linters:
-        - gochecknoinits
-        - gomnd
-
-  exclude-use-default: false
-  exclude-case-sensitive: false
-  include-whole-files: false
-  max-issues-per-linter: 50
-  max-same-issues: 3
-  new: false
-  new-from-rev: ""
-  new-from-patch: ""
-
-severity:
-  default-severity: error
-  case-sensitive: false
-  rules:
-    - linters:
-        - dupl
-      severity: info
-    - linters:
-        - gocritic
-      severity: info
+  max-issues-per-linter: 0
+  max-same-issues: 0

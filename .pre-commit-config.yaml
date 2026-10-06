@@ -7,9 +7,11 @@ ci:
   skip:
     - gha-workflow-linter
     - aislop
+    - go-fmt
     - go-vet
     - go-mod-verify
     - go-mod-tidy
+    - golangci-lint
   autofix_commit_msg: |
     Chore: Pre-commit autofixes
 
@@ -154,35 +156,42 @@ repos:
           - yaml
       - id: check-readthedocs
 
+  # Go hooks from actions-template, run in order: fmt, tidy, vet, lint.
+  # go-mod-verify is this repository's own, matching CI.
   - repo: local
     hooks:
       - id: go-fmt
-        name: go fmt (CI requirement)
-        description: Runs `gofmt -l .` to check formatting, as CI does
-        entry: >
-          bash -c 'if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
-          echo "❌ Code is not formatted:"; gofmt -l .; exit 1; fi'
+        name: go format (gofmt + goimports)
+        # yamllint disable-line rule:line-length
+        entry: bash -c 'sh .github/hooks/manifest-guard.sh go.mod "*.go"; rc=$?; case "$rc" in 3) ;; 4) exit 0;; *) exit "$rc";; esac; command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed - see https://golangci-lint.run/welcome/install/" >&2; exit 1; }; sh .github/hooks/manifest-guard.sh --list go.mod "*.go" | xargs -0 golangci-lint fmt'
         language: system
-        files: '\.go$'
+        always_run: true
+        pass_filenames: false
+      - id: go-mod-tidy
+        name: go mod tidy
+        # yamllint disable-line rule:line-length
+        entry: bash -c 'sh .github/hooks/manifest-guard.sh go.mod "*.go"; rc=$?; case "$rc" in 3|4) ;; *) exit "$rc";; esac; go mod tidy'
+        language: system
+        always_run: true
         pass_filenames: false
       - id: go-vet
-        name: go vet (CI requirement)
-        description: Runs `go vet ./...`, exactly as CI does
-        entry: go vet ./...
+        name: go vet
+        # yamllint disable-line rule:line-length
+        entry: bash -c 'sh .github/hooks/manifest-guard.sh go.mod "*.go"; rc=$?; case "$rc" in 3) ;; 4) exit 0;; *) exit "$rc";; esac; go vet ./...'
         language: system
-        files: '\.go$'
+        always_run: true
+        pass_filenames: false
+      - id: golangci-lint
+        name: golangci-lint
+        # yamllint disable-line rule:line-length
+        entry: bash -c 'sh .github/hooks/manifest-guard.sh go.mod "*.go"; rc=$?; case "$rc" in 3) ;; 4) exit 0;; *) exit "$rc";; esac; command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed - see https://golangci-lint.run/welcome/install/" >&2; exit 1; }; golangci-lint run --timeout=5m'
+        language: system
+        always_run: true
         pass_filenames: false
       - id: go-mod-verify
         name: go mod verify
         description: Verifies dependencies, as CI does
         entry: bash -c 'go mod download && go mod verify'
-        language: system
-        files: '^go\.(mod|sum)$'
-        pass_filenames: false
-      - id: go-mod-tidy
-        name: go mod tidy
-        description: Ensures go.mod and go.sum are tidy
-        entry: bash -c 'go mod tidy && git diff --exit-code go.mod go.sum'
         language: system
         files: '^go\.(mod|sum)$'
         pass_filenames: false

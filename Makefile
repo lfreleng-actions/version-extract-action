@@ -23,6 +23,9 @@ LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.da
 TEST_DATA_DIR=test-samples
 INTEGRATION_REPORT=integration-test-report.json
 
+# Keep in step with the golangci-lint version in .github/workflows/testing.yaml
+GOLANGCI_LINT_VERSION=v2.14.0
+
 # Default target
 .DEFAULT_GOAL := help
 
@@ -97,7 +100,8 @@ lint-full: lint-fast ## Comprehensive linting (requires external tools)
 		golangci-lint run --timeout=5m; \
 		echo "✅ golangci-lint passed"; \
 	else \
-		echo "⚠️  golangci-lint not found, skipping"; \
+		echo "❌ golangci-lint not found, install with: make dev-setup"; \
+		exit 1; \
 	fi
 	@if command -v staticcheck >/dev/null 2>&1; then \
 		staticcheck ./...; \
@@ -263,7 +267,7 @@ security-scan: ## Run security scan
 		gosec ./...; \
 		echo "✅ Security scan completed"; \
 	else \
-		echo "⚠️  gosec not found, install with: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest"; \
+		echo "⚠️  gosec not found, install with: go install github.com/securego/gosec/v2/cmd/gosec@latest"; \
 	fi
 
 .PHONY: benchmark
@@ -278,8 +282,8 @@ dev-setup: ## Setup development environment
 	@echo "🛠️  Setting up development environment..."
 	@echo "Installing development tools..."
 	@if ! command -v golangci-lint >/dev/null 2>&1; then \
-		echo "Installing golangci-lint..."; \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
+		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
 	@if ! command -v staticcheck >/dev/null 2>&1; then \
 		echo "Installing staticcheck..."; \
@@ -287,7 +291,7 @@ dev-setup: ## Setup development environment
 	fi
 	@if ! command -v gosec >/dev/null 2>&1; then \
 		echo "Installing gosec..."; \
-		go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest; \
+		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
 	fi
 	@if [ -f .pre-commit-config.yaml ]; then \
 		if command -v pre-commit >/dev/null 2>&1; then \

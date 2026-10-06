@@ -326,10 +326,15 @@ make ci
 
 Git hooks run automatically before each commit, matching CI requirements:
 
-- **go fmt** - Code formatting (`gofmt -l .`)
-- **go vet** - Static analysis (`go vet ./...`)
-- **go mod verify** - Dependency verification
+- **go format** - `gofmt` and `goimports`, applied by `golangci-lint fmt`
 - **go mod tidy** - Dependency cleanup
+- **go vet** - Static analysis (`go vet ./...`)
+- **golangci-lint** - Linters configured in `.golangci.yml`
+- **go mod verify** - Dependency verification
+
+The Go hooks need a Go toolchain and
+[golangci-lint](https://golangci-lint.run/welcome/install/) v2 on `PATH`
+(`make dev-setup` installs it). CI runs golangci-lint as well.
 
 These hooks prevent CI failures by catching issues locally before pushing.
 
