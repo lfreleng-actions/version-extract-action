@@ -29,7 +29,7 @@ func NewFileReader() FileReaderInterface {
 }
 
 // Global instance for use throughout the package
-var fileReader FileReaderInterface = NewFileReader()
+var fileReader = NewFileReader()
 
 // ValidateFileSize checks if file size is within acceptable limits
 func (fr *FileReader) ValidateFileSize(filePath string) error {
@@ -51,7 +51,8 @@ func (fr *FileReader) ReadFileContent(filePath string, normalizeContent bool) (s
 		return "", err
 	}
 
-	content, err := os.ReadFile(filePath)
+	// Reading the paths a user points the tool at is its purpose.
+	content, err := os.ReadFile(filePath) //nolint:gosec // G304: path is the input
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
@@ -75,11 +76,11 @@ func (fr *FileReader) ProcessFileLineByLine(filePath string, processor func(stri
 		return "", err
 	}
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // G304: path is the input
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // read-only; nothing to flush
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

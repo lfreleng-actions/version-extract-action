@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2025 The Linux Foundation
 
+// Package extractor locates project metadata files and extracts version
+// strings from them using the configured regular expressions.
 package extractor
 
 import (
@@ -145,7 +147,10 @@ func (e *VersionExtractor) lookupConstantValue(ident, searchPath,
 		if statErr != nil || !info.IsDir() {
 			return
 		}
-		_ = filepath.Walk(root, func(path string, fi os.FileInfo,
+		// Best-effort scan: unreadable entries are skipped, and the only error
+		// the callback returns is errStopWalk, which signals success or the
+		// scan limit. Neither is a failure to report.
+		_ = filepath.Walk(root, func(path string, fi os.FileInfo, //nolint:errcheck // best-effort walk
 			werr error) error {
 			if werr != nil {
 				return nil

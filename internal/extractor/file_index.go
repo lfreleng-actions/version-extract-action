@@ -29,7 +29,10 @@ func (e *VersionExtractor) buildFileIndex(searchPath string) *fileIndex {
 	// otherwise unclean path.
 	searchPath = filepath.Clean(searchPath)
 	idx := &fileIndex{root: searchPath, byName: make(map[string][]string)}
-	_ = filepath.Walk(searchPath, func(path string, info os.FileInfo,
+	// Best-effort: the callback skips unreadable entries rather than failing,
+	// so Walk can only return an error for the root, which leaves the index
+	// empty, the same outcome as a root with no files.
+	_ = filepath.Walk(searchPath, func(path string, info os.FileInfo, //nolint:errcheck // best-effort walk
 		err error) error {
 		if err != nil {
 			return nil // continue despite errors, matching prior behaviour
@@ -82,7 +85,8 @@ func (idx *fileIndex) match(pattern string) []string {
 	var rootMatches, deepMatches []string
 	for _, p := range candidates {
 		if isGlob {
-			if ok, _ := filepath.Match(pattern, filepath.Base(p)); !ok {
+			// A malformed glob (ErrBadPattern) simply matches nothing.
+			if ok, _ := filepath.Match(pattern, filepath.Base(p)); !ok { //nolint:errcheck // bad glob = no match
 				continue
 			}
 		}

@@ -25,6 +25,13 @@ const (
 // This is a package-level constant to prevent accidental modification
 var defaultSkipDirectories = []string{"node_modules", "vendor", "target", "build", "dist"}
 
+// VersionSource values reported in ExtractResult.
+const (
+	sourceStatic         = "static"
+	sourceStaticConstant = "static-constant"
+	sourceDynamicGitTag  = "dynamic-git-tag"
+)
+
 // ExtractResult represents the result of version extraction
 type ExtractResult struct {
 	Version       string `json:"version"`
@@ -118,7 +125,7 @@ func (e *VersionExtractor) extractFromSpecificFile(filePath string) (*ExtractRes
 			File:          filePath,
 			MatchedBy:     matchedRegex,
 			Success:       true,
-			VersionSource: "static",
+			VersionSource: sourceStatic,
 		}, nil
 	}
 
@@ -135,7 +142,7 @@ func (e *VersionExtractor) extractFromSpecificFile(filePath string) (*ExtractRes
 			File:          filePath,
 			MatchedBy:     matchedBy,
 			Success:       true,
-			VersionSource: "static-constant",
+			VersionSource: sourceStaticConstant,
 		}, nil
 	}
 
@@ -182,14 +189,7 @@ func (e *VersionExtractor) extractFromDirectory(searchPath string) (*ExtractResu
 
 	// Try each project configuration in priority order
 	for _, project := range e.config.Projects {
-		result, err := e.tryExtractFromProject(searchPath, project, idx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to extract from %s: %v\n",
-				project.Type, err)
-			continue
-		}
-
-		if result.Success {
+		if result := e.tryExtractFromProject(searchPath, project, idx); result.Success {
 			return result, nil
 		}
 	}
@@ -200,28 +200,29 @@ func (e *VersionExtractor) extractFromDirectory(searchPath string) (*ExtractResu
 }
 
 // tryExtractFromProject attempts version extraction for a specific project
-// type
+// type. Per-file errors are reported as warnings and skipped, so the result
+// is either a success or Success: false.
 func (e *VersionExtractor) tryExtractFromProject(searchPath string,
-	project config.ProjectConfig, idx *fileIndex) (*ExtractResult, error) {
+	project config.ProjectConfig, idx *fileIndex) *ExtractResult {
 
 	// Skip projects with empty regex patterns - they should use git tags
 	if len(project.Regex) == 0 {
 		// Early return if dynamic fallback is not enabled or project doesn't support it
 		// This avoids unnecessary file system operations
 		if !e.dynamicFallback || !project.SupportsDynamicVersioning {
-			return &ExtractResult{Success: false}, nil
+			return &ExtractResult{Success: false}
 		}
 
 		// Check if the project file exists (e.g., go.mod for Go projects)
 		files := idx.match(project.File)
 		if len(files) == 0 {
-			return &ExtractResult{Success: false}, nil
+			return &ExtractResult{Success: false}
 		}
 
 		// File exists but no regex patterns - use git fallback for version
 		gitResult := e.tryGitFallback(searchPath)
 		if gitResult == nil || !gitResult.Success {
-			return &ExtractResult{Success: false}, nil
+			return &ExtractResult{Success: false}
 		}
 
 		return &ExtractResult{
@@ -231,15 +232,15 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 			File:          files[0],
 			MatchedBy:     "git-fallback",
 			Success:       true,
-			VersionSource: "dynamic-git-tag",
+			VersionSource: sourceDynamicGitTag,
 			GitTag:        gitResult.Tag,
-		}, nil
+		}
 	}
 
 	// Find matching files
 	files := idx.match(project.File)
 	if len(files) == 0 {
-		return &ExtractResult{Success: false}, nil
+		return &ExtractResult{Success: false}
 	}
 
 	// Try to extract version from each found file
@@ -261,11 +262,11 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 						ProjectType:   project.Type,
 						Subtype:       project.Subtype,
 						File:          file,
-						MatchedBy:     "dynamic-git-tag",
+						MatchedBy:     sourceDynamicGitTag,
 						Success:       true,
-						VersionSource: "dynamic-git-tag",
+						VersionSource: sourceDynamicGitTag,
 						GitTag:        gitResult.Tag,
-					}, nil
+					}
 				}
 			}
 		}
@@ -280,8 +281,8 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 				File:          file,
 				MatchedBy:     matchedRegex,
 				Success:       true,
-				VersionSource: "static",
-			}, nil
+				VersionSource: sourceStatic,
+			}
 		}
 
 		// Fallback: the version may be assigned from a named Kotlin/Gradle
@@ -296,12 +297,12 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 				File:          file,
 				MatchedBy:     matchedBy,
 				Success:       true,
-				VersionSource: "static-constant",
-			}, nil
+				VersionSource: sourceStaticConstant,
+			}
 		}
 	}
 
-	return &ExtractResult{Success: false}, nil
+	return &ExtractResult{Success: false}
 }
 
 // findProjectFiles returns files matching the given pattern beneath searchPath.
@@ -309,14 +310,15 @@ func (e *VersionExtractor) tryExtractFromProject(searchPath string,
 // same tree should build a fileIndex once and call match directly (as
 // extractFromDirectory does) rather than calling this per pattern.
 func (e *VersionExtractor) findProjectFiles(searchPath,
-	pattern string) ([]string, error) {
-	return e.buildFileIndex(searchPath).match(pattern), nil
+	pattern string) []string {
+	return e.buildFileIndex(searchPath).match(pattern)
 }
 
 // fileMatchesPattern checks if a filename matches a project file pattern
 func (e *VersionExtractor) fileMatchesPattern(fileName, pattern string) bool {
 	if strings.Contains(pattern, "*") {
-		matched, _ := filepath.Match(pattern, fileName)
+		// A malformed glob (ErrBadPattern) simply matches nothing.
+		matched, _ := filepath.Match(pattern, fileName) //nolint:errcheck // bad glob = no match
 		return matched
 	}
 	return fileName == pattern
@@ -353,7 +355,7 @@ func (e *VersionExtractor) GetSkipDirectories() []string {
 }
 
 // tryGitFallback attempts to extract version from Git tags
-func (e *VersionExtractor) tryGitFallback(searchPath string) *git.GitTagResult {
+func (e *VersionExtractor) tryGitFallback(searchPath string) *git.TagResult {
 	gitExtractor := git.New(searchPath)
 
 	// Get the latest version tag. Local tags are tried first; if none are
@@ -361,7 +363,7 @@ func (e *VersionExtractor) tryGitFallback(searchPath string) *git.GitTagResult {
 	// which is far cheaper than fetching tag objects over the network.
 	result, err := gitExtractor.GetLatestVersionTag()
 	if err != nil {
-		return &git.GitTagResult{
+		return &git.TagResult{
 			Success:   false,
 			IsGitRepo: gitExtractor.IsGitRepository(),
 		}

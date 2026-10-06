@@ -211,7 +211,7 @@ func TestFileReader_ReadFileContentWithFallback(t *testing.T) {
 			}
 			return "", false
 		},
-		func(content string) (string, error) {
+		func(_ string) (string, error) {
 			t.Error("Should not reach full content processor")
 			return "", nil
 		},
@@ -297,7 +297,7 @@ func TestFileReader_ErrorHandling(t *testing.T) {
 	}
 
 	// Test processing non-existent file
-	_, err = fr.ProcessFileLineByLine("/nonexistent/file.txt", func(line string) (string, bool) {
+	_, err = fr.ProcessFileLineByLine("/nonexistent/file.txt", func(_ string) (string, bool) {
 		return "", false
 	})
 	if err == nil {

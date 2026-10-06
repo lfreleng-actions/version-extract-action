@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2025 The Linux Foundation
 
+// Package git resolves a project version from its Git tags, as a fallback
+// for projects whose metadata does not carry a static version.
 package git
 
 import (
@@ -90,22 +92,22 @@ func compileVersionTagPatterns() ([]*regexp.Regexp, error) {
 	return []*regexp.Regexp{re}, nil
 }
 
-// GitTagResult represents the result of Git tag extraction
-type GitTagResult struct {
+// TagResult represents the result of Git tag extraction
+type TagResult struct {
 	Version   string `json:"version"`
 	Tag       string `json:"tag"`
 	Success   bool   `json:"success"`
 	IsGitRepo bool   `json:"is_git_repo"`
 }
 
-// GitVersionExtractor handles Git-based version extraction
-type GitVersionExtractor struct {
+// TagExtractor handles Git-based version extraction
+type TagExtractor struct {
 	workingDir string
 }
 
-// New creates a new GitVersionExtractor
-func New(workingDir string) *GitVersionExtractor {
-	return &GitVersionExtractor{
+// New creates a new TagExtractor
+func New(workingDir string) *TagExtractor {
+	return &TagExtractor{
 		workingDir: workingDir,
 	}
 }
@@ -122,11 +124,12 @@ const (
 // and returns its standard output. On failure it surfaces the git arguments,
 // the captured stderr, and distinguishes timeouts, so callers (and logs) get
 // actionable diagnostics instead of a bare "exit status 128".
-func (g *GitVersionExtractor) runGit(timeout time.Duration,
+func (g *TagExtractor) runGit(timeout time.Duration,
 	args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// The binary is fixed and args come only from this package's callers.
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: fixed binary
 	cmd.Dir = g.workingDir
 	out, err := cmd.Output()
 	if err == nil {
@@ -147,7 +150,7 @@ func (g *GitVersionExtractor) runGit(timeout time.Duration,
 }
 
 // IsGitRepository checks if the working directory is a Git repository
-func (g *GitVersionExtractor) IsGitRepository() bool {
+func (g *TagExtractor) IsGitRepository() bool {
 	// Check if .git directory exists
 	gitDir := filepath.Join(g.workingDir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
@@ -160,8 +163,8 @@ func (g *GitVersionExtractor) IsGitRepository() bool {
 }
 
 // GetLatestVersionTag extracts the latest version tag from Git
-func (g *GitVersionExtractor) GetLatestVersionTag() (*GitTagResult, error) {
-	result := &GitTagResult{
+func (g *TagExtractor) GetLatestVersionTag() (*TagResult, error) {
+	result := &TagResult{
 		IsGitRepo: g.IsGitRepository(),
 	}
 
@@ -187,7 +190,7 @@ func (g *GitVersionExtractor) GetLatestVersionTag() (*GitTagResult, error) {
 }
 
 // tryGetLatestTag attempts multiple strategies to get the latest version tag
-func (g *GitVersionExtractor) tryGetLatestTag() (string, string, error) {
+func (g *TagExtractor) tryGetLatestTag() (string, string, error) {
 	// Strategy 1: git describe --tags --abbrev=0 --match="v*" (semantic versioning)
 	if version, tag, err := g.getTagWithDescribe("v*"); err == nil && version != "" {
 		return version, tag, nil
@@ -225,7 +228,7 @@ func (g *GitVersionExtractor) tryGetLatestTag() (string, string, error) {
 }
 
 // getTagWithDescribe uses git describe to get the latest tag
-func (g *GitVersionExtractor) getTagWithDescribe(matchPattern string) (string, string, error) {
+func (g *TagExtractor) getTagWithDescribe(matchPattern string) (string, string, error) {
 	args := []string{"describe", "--tags", "--abbrev=0"}
 	if matchPattern != "" {
 		args = append(args, fmt.Sprintf("--match=%s", matchPattern))
@@ -246,7 +249,7 @@ func (g *GitVersionExtractor) getTagWithDescribe(matchPattern string) (string, s
 }
 
 // getTagWithList uses git tag --list with sorting to get the latest tag
-func (g *GitVersionExtractor) getTagWithList() (string, string, error) {
+func (g *TagExtractor) getTagWithList() (string, string, error) {
 	output, err := g.runGit(gitLocalTimeout, "tag", "--list",
 		"--sort=-version:refname")
 	if err != nil {
@@ -282,7 +285,7 @@ func (g *GitVersionExtractor) getTagWithList() (string, string, error) {
 // only, no object download) and returns the highest-sorted valid version tag.
 // This is dramatically cheaper than `git fetch --tags` on large repositories,
 // where fetching tag objects onto a shallow clone can take many minutes.
-func (g *GitVersionExtractor) getTagFromRemote() (string, string, error) {
+func (g *TagExtractor) getTagFromRemote() (string, string, error) {
 	output, err := g.runGit(gitRemoteTimeout, "ls-remote", "--tags",
 		"--sort=-version:refname", "origin")
 	if err != nil {
@@ -317,7 +320,7 @@ func (g *GitVersionExtractor) getTagFromRemote() (string, string, error) {
 }
 
 // cleanVersionFromTag extracts version from a git tag
-func (g *GitVersionExtractor) cleanVersionFromTag(tag string) string {
+func (g *TagExtractor) cleanVersionFromTag(tag string) string {
 	version := strings.TrimSpace(tag)
 
 	// Remove 'v' prefix if present
@@ -338,7 +341,7 @@ func (g *GitVersionExtractor) cleanVersionFromTag(tag string) string {
 // isValidVersionTag reports whether version matches any of the recognised
 // version tag shapes. It returns an error only when the patterns themselves
 // could not be compiled, which leaves no way to classify the tag.
-func (g *GitVersionExtractor) isValidVersionTag(version string) (bool, error) {
+func (g *TagExtractor) isValidVersionTag(version string) (bool, error) {
 	if version == "" {
 		return false, nil
 	}
@@ -358,7 +361,7 @@ func (g *GitVersionExtractor) isValidVersionTag(version string) (bool, error) {
 }
 
 // FetchTags attempts to fetch remote tags (useful in CI environments)
-func (g *GitVersionExtractor) FetchTags() error {
+func (g *TagExtractor) FetchTags() error {
 	if !g.IsGitRepository() {
 		return fmt.Errorf("not a git repository")
 	}

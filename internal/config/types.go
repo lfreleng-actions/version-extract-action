@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2025 The Linux Foundation
 
+// Package config loads and validates the YAML project-type patterns used
+// for version extraction.
 package config
 
 import (
@@ -50,8 +52,8 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("config file not found: %s", configPath)
 	}
 
-	// Read config file
-	data, err := os.ReadFile(configPath)
+	// Read config file; the path comes from the --config flag or the default.
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is the input
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}

@@ -23,11 +23,7 @@ func TestNew(t *testing.T) {
 
 func TestIsGitRepository(t *testing.T) {
 	// Test with a non-git directory
-	tempDir, err := os.MkdirTemp("", "git-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	extractor := New(tempDir)
 	if extractor.IsGitRepository() {
@@ -98,11 +94,7 @@ func TestIsValidVersionTag(t *testing.T) {
 }
 
 func TestGetLatestVersionTag_NonGitRepo(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "git-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	extractor := New(tempDir)
 	result, err := extractor.GetLatestVersionTag()
@@ -132,11 +124,7 @@ func TestGetLatestVersionTag_WithGitRepo(t *testing.T) {
 	}
 
 	// Create a temporary git repository
-	tempDir, err := os.MkdirTemp("", "git-repo-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Initialize git repo
 	if err := runGitCommand(tempDir, "init"); err != nil {
@@ -211,11 +199,7 @@ func TestGetLatestVersionTag_RemoteFallback(t *testing.T) {
 		t.Skip("git not available, skipping integration test")
 	}
 
-	base, err := os.MkdirTemp("", "git-remote-fallback-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(base)
+	base := t.TempDir()
 
 	remote := filepath.Join(base, "remote.git")
 	work := filepath.Join(base, "work")
@@ -263,15 +247,10 @@ func TestGetLatestVersionTag_RemoteFallback(t *testing.T) {
 
 func TestFetchTags(t *testing.T) {
 	// Test with non-git directory
-	tempDir, err := os.MkdirTemp("", "git-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	extractor := New(tempDir)
-	err = extractor.FetchTags()
-	if err == nil {
+	if err := extractor.FetchTags(); err == nil {
 		t.Error("Expected error for non-git repository, got nil")
 	}
 }
@@ -298,7 +277,7 @@ func BenchmarkIsValidVersionTag(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = extractor.isValidVersionTag("1.2.3-beta.1")
+		_, _ = extractor.isValidVersionTag("1.2.3-beta.1") //nolint:errcheck // benchmark
 	}
 }
 

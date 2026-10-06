@@ -14,6 +14,9 @@ const projectVersionPattern = `^version\s*=\s*["']([^"']+)["']`
 
 var dunderVersionPatterns = []string{`__version__\s*=\s*["']([^"']+)["']`}
 
+// dunderVersionFile is the conventional Python module holding __version__.
+const dunderVersionFile = "__version__.py"
+
 // extractFromPyprojectToml handles pyproject.toml with section-aware parsing
 func (e *VersionExtractor) extractFromPyprojectToml(filePath string) (string, string, error) {
 	fileContent, err := fileReader.ReadFileContent(filePath, false)
@@ -63,9 +66,9 @@ func (e *VersionExtractor) extractFromPyprojectToml(filePath string) (string, st
 	// Limit search to prevent performance issues in large projects
 	projectDir := filepath.Dir(filePath)
 	versionFiles := []string{
-		filepath.Join(projectDir, "__version__.py"),
-		filepath.Join(projectDir, "src", "*", "__version__.py"),
-		filepath.Join(projectDir, "*", "__version__.py"),
+		filepath.Join(projectDir, dunderVersionFile),
+		filepath.Join(projectDir, "src", "*", dunderVersionFile),
+		filepath.Join(projectDir, "*", dunderVersionFile),
 	}
 
 	filesChecked := 0
@@ -85,7 +88,7 @@ func (e *VersionExtractor) extractFromPyprojectToml(filePath string) (string, st
 			// the latter routes any file whose basename is "pyproject.toml"
 			// back into the section-aware parser above.
 			if version, _, err := e.extractVersionWithPatterns(versionFile, dunderVersionPatterns); err == nil && version != "" {
-				return version, "__version__.py", nil
+				return version, dunderVersionFile, nil
 			}
 		}
 		// Break outer loop if limit reached

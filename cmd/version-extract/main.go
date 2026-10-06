@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-// Version extractor CLI tool with fixed verbose output handling
+// Command version-extract extracts version strings from software projects.
 package main
 
 import (
@@ -14,6 +14,15 @@ import (
 
 	"github.com/lfreleng-actions/version-extract-action/internal/config"
 	"github.com/lfreleng-actions/version-extract-action/internal/extractor"
+)
+
+// Output format names accepted by --format and --json-format.
+const (
+	formatJSON       = "json"
+	jsonFormatPretty = "pretty"
+
+	// keySuccess is the JSON output field reporting whether extraction worked.
+	keySuccess = "success"
 )
 
 var (
@@ -38,7 +47,7 @@ func verboseLog(message string) {
 	if !verbose {
 		return
 	}
-	if outputFormat == "json" {
+	if outputFormat == formatJSON {
 		fmt.Fprintf(os.Stderr, "%s\n", message)
 	} else {
 		fmt.Printf("%s\n", message)
@@ -64,7 +73,7 @@ uses regular expressions to extract version information.`,
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Printf("version-extract %s\n", version)
 		fmt.Printf("commit: %s\n", commit)
 		fmt.Printf("built: %s\n", date)
@@ -101,7 +110,7 @@ func init() {
 		"Enable verbose output")
 	rootCmd.Flags().BoolVar(&failOnError, "fail-on-error", true,
 		"Exit with error code if version cannot be extracted")
-	rootCmd.Flags().StringVar(&jsonFormat, "json-format", "pretty",
+	rootCmd.Flags().StringVar(&jsonFormat, "json-format", jsonFormatPretty,
 		"JSON output format: pretty, minimised")
 	rootCmd.Flags().BoolVar(&dynamicFallback, "dynamic-fallback", true,
 		"Enable dynamic versioning fallback to Git tags")
@@ -111,7 +120,7 @@ func init() {
 		"Path to configuration file (default: configs/default-patterns.yaml)")
 	listCmd.Flags().StringVarP(&outputFormat, "format", "f", "text",
 		"Output format: text, json")
-	listCmd.Flags().StringVar(&jsonFormat, "json-format", "pretty",
+	listCmd.Flags().StringVar(&jsonFormat, "json-format", jsonFormatPretty,
 		"JSON output format: pretty, minimised")
 
 	// Add subcommands
@@ -120,7 +129,7 @@ func init() {
 }
 
 // runExtractor is the main extraction function
-func runExtractor(cmd *cobra.Command, args []string) error {
+func runExtractor(_ *cobra.Command, _ []string) error {
 	// Set default config path if not provided
 	if configPath == "" {
 		configPath = config.GetDefaultConfigPath()
@@ -161,26 +170,27 @@ func runExtractor(cmd *cobra.Command, args []string) error {
 
 // handleError outputs error in the appropriate format and returns the error
 func handleError(err error) error {
-	if outputFormat == "json" {
+	if outputFormat == formatJSON {
 		// Output JSON error format
 		output := map[string]interface{}{
-			"success": false,
-			"error":   err.Error(),
+			keySuccess: false,
+			"error":    err.Error(),
 		}
 
 		var data []byte
 		var jsonErr error
-		if jsonFormat == "pretty" {
+		if jsonFormat == jsonFormatPretty {
 			data, jsonErr = json.MarshalIndent(output, "", "  ")
 		} else {
 			data, jsonErr = json.Marshal(output)
 		}
 		if jsonErr != nil {
 			fallbackOutput := map[string]interface{}{
-				"success": false,
-				"error":   fmt.Sprintf("JSON marshal error: %s", jsonErr.Error()),
+				keySuccess: false,
+				"error":    fmt.Sprintf("JSON marshal error: %s", jsonErr.Error()),
 			}
-			fallbackData, _ := json.Marshal(fallbackOutput)
+			// A map of two strings cannot fail to marshal.
+			fallbackData, _ := json.Marshal(fallbackOutput) //nolint:errcheck // cannot fail
 			fmt.Fprintln(os.Stderr, string(fallbackData))
 		} else {
 			fmt.Println(string(data))
@@ -193,7 +203,7 @@ func handleError(err error) error {
 }
 
 // listSupportedTypes lists all supported project types
-func listSupportedTypes(cmd *cobra.Command, args []string) error {
+func listSupportedTypes(_ *cobra.Command, _ []string) error {
 	// Set default config path if not provided
 	if configPath == "" {
 		configPath = config.GetDefaultConfigPath()
@@ -212,10 +222,10 @@ func listSupportedTypes(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output supported types
-	if outputFormat == "json" {
+	if outputFormat == formatJSON {
 		var data []byte
 		var err error
-		if jsonFormat == "pretty" {
+		if jsonFormat == jsonFormatPretty {
 			data, err = json.MarshalIndent(cfg.Projects, "", "  ")
 		} else {
 			data, err = json.Marshal(cfg.Projects)
@@ -248,9 +258,9 @@ func listSupportedTypes(cmd *cobra.Command, args []string) error {
 
 // outputResult formats and outputs the extraction result
 func outputResult(result *extractor.ExtractResult, extractErr error) error {
-	if outputFormat == "json" {
+	if outputFormat == formatJSON {
 		output := map[string]interface{}{
-			"success": result != nil && result.Success,
+			keySuccess: result != nil && result.Success,
 		}
 
 		if result != nil {
@@ -271,7 +281,7 @@ func outputResult(result *extractor.ExtractResult, extractErr error) error {
 
 		var data []byte
 		var err error
-		if jsonFormat == "pretty" {
+		if jsonFormat == jsonFormatPretty {
 			data, err = json.MarshalIndent(output, "", "  ")
 		} else {
 			data, err = json.Marshal(output)
