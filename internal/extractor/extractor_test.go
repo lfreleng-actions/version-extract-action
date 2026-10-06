@@ -298,7 +298,7 @@ description = "Test project without version"`
 	// Create 15 files to exceed the limit
 	for i := 1; i <= 15; i++ {
 		subdir := filepath.Join(tmpDir, fmt.Sprintf("package%d", i))
-		err := os.MkdirAll(subdir, 0755)
+		err = os.MkdirAll(subdir, 0755)
 		if err != nil {
 			t.Fatalf("Failed to create subdirectory: %v", err)
 		}
@@ -376,7 +376,7 @@ description = "Test project without version"`
 	// Create exactly maxVersionFilesToCheck (10) __version__.py files
 	for i := 1; i <= 10; i++ {
 		subdir := filepath.Join(tmpDir, fmt.Sprintf("pkg%02d", i))
-		err := os.MkdirAll(subdir, 0755)
+		err = os.MkdirAll(subdir, 0755)
 		if err != nil {
 			t.Fatalf("Failed to create subdirectory: %v", err)
 		}
@@ -416,6 +416,11 @@ description = "Test project without version"`
 
 	extractor := New(cfg)
 	result, err := extractor.Extract(tmpDir)
+	if err != nil {
+		// Finding no version is acceptable here; the assertions below
+		// only reject a version read from the wrong place.
+		t.Logf("Extract returned an error (acceptable): %v", err)
+	}
 
 	// Should NOT find version 99.99.99 because it's in the 11th file (beyond the limit)
 	// Expected versions from the first 10 files (any of these is valid)
@@ -623,20 +628,14 @@ func TestFindProjectFiles(t *testing.T) {
 	extractor := &VersionExtractor{}
 
 	// Test exact file matching
-	matches, err := extractor.findProjectFiles(tmpDir, "package.json")
-	if err != nil {
-		t.Fatalf("Error finding files: %v", err)
-	}
+	matches := extractor.findProjectFiles(tmpDir, "package.json")
 
 	if len(matches) < 1 {
 		t.Error("Expected at least 1 match for package.json")
 	}
 
 	// Test glob pattern matching
-	matches, err = extractor.findProjectFiles(tmpDir, "*.json")
-	if err != nil {
-		t.Fatalf("Error finding files with glob: %v", err)
-	}
+	matches = extractor.findProjectFiles(tmpDir, "*.json")
 
 	if len(matches) < 1 {
 		t.Error("Expected at least 1 match for *.json")
@@ -1688,10 +1687,7 @@ func TestSkipDirectoriesInFileSearch(t *testing.T) {
 	extractor := New(cfg)
 
 	// First test with default skip directories
-	files, err := extractor.findProjectFiles(tmpDir, "package.json")
-	if err != nil {
-		t.Fatalf("Failed to find project files: %v", err)
-	}
+	files := extractor.findProjectFiles(tmpDir, "package.json")
 
 	// Should find files in src and custom_skip, but not in node_modules or vendor
 	expectedFiles := []string{
@@ -1707,10 +1703,7 @@ func TestSkipDirectoriesInFileSearch(t *testing.T) {
 	customSkipDirs := []string{"custom_skip", "temp"}
 	extractor.SetSkipDirectories(customSkipDirs)
 
-	files, err = extractor.findProjectFiles(tmpDir, "package.json")
-	if err != nil {
-		t.Fatalf("Failed to find project files with custom skip dirs: %v", err)
-	}
+	files = extractor.findProjectFiles(tmpDir, "package.json")
 
 	// Should now find files in src, node_modules, and vendor, but not in custom_skip
 	expectedFilesCustom := []string{
@@ -2160,6 +2153,11 @@ packages = ["mypackage"]`
 
 	extractor := New(cfg)
 	result, err := extractor.Extract(tmpDir)
+	if err != nil {
+		// Finding no version is acceptable here; the assertions below
+		// only reject a version read from the wrong place.
+		t.Logf("Extract returned an error (acceptable): %v", err)
+	}
 
 	// Debug output
 	if result.Success {

@@ -16,7 +16,6 @@ import (
 func BenchmarkExtractVersion(b *testing.B) {
 	// Create temporary test project
 	tempDir := createTempJavaScriptProject(b)
-	defer os.RemoveAll(tempDir)
 
 	// Load configuration
 	cfg, err := config.LoadConfig("../../configs/default-patterns.yaml")
@@ -43,7 +42,6 @@ func BenchmarkExtractVersion(b *testing.B) {
 // BenchmarkExtractVersionLargeProject benchmarks with a project containing many files
 func BenchmarkExtractVersionLargeProject(b *testing.B) {
 	tempDir := createLargeTestProject(b)
-	defer os.RemoveAll(tempDir)
 
 	cfg, err := config.LoadConfig("../../configs/default-patterns.yaml")
 	if err != nil {
@@ -86,7 +84,6 @@ func BenchmarkMultipleProjectTypes(b *testing.B) {
 	for projectType, createFunc := range projects {
 		b.Run(projectType, func(b *testing.B) {
 			tempDir := createFunc(b)
-			defer os.RemoveAll(tempDir)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -159,15 +156,10 @@ func BenchmarkRegexMatching(b *testing.B) {
 	b.ReportAllocs()
 
 	// Create a temporary file for testing
-	tempDir, err := os.MkdirTemp("", "benchmark-regex-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := b.TempDir()
 
 	testFile := filepath.Join(tempDir, "package.json")
-	err = os.WriteFile(testFile, []byte(testContent), 0644)
-	if err != nil {
+	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
 		b.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -185,7 +177,6 @@ func BenchmarkRegexMatching(b *testing.B) {
 // BenchmarkFileSystemOperations benchmarks file system scanning performance
 func BenchmarkFileSystemOperations(b *testing.B) {
 	tempDir := createDeepDirectoryStructure(b)
-	defer os.RemoveAll(tempDir)
 
 	cfg, err := config.LoadConfig("../../configs/default-patterns.yaml")
 	if err != nil {
@@ -226,10 +217,7 @@ func BenchmarkFileSystemOperations(b *testing.B) {
 func createTempJavaScriptProject(b *testing.B) string {
 	b.Helper()
 
-	tempDir, err := os.MkdirTemp("", "benchmark-js-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tempDir := b.TempDir()
 
 	packageJSON := `{
 		"name": "benchmark-test-project",
@@ -249,8 +237,7 @@ func createTempJavaScriptProject(b *testing.B) string {
 		}
 	}`
 
-	err = os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(packageJSON), 0644)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(packageJSON), 0644); err != nil {
 		b.Fatalf("Failed to write package.json: %v", err)
 	}
 
@@ -260,10 +247,7 @@ func createTempJavaScriptProject(b *testing.B) string {
 func createTempPythonProject(b *testing.B) string {
 	b.Helper()
 
-	tempDir, err := os.MkdirTemp("", "benchmark-py-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tempDir := b.TempDir()
 
 	pyprojectToml := `[project]
 name = "benchmark-test-project"
@@ -278,8 +262,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 `
 
-	err = os.WriteFile(filepath.Join(tempDir, "pyproject.toml"), []byte(pyprojectToml), 0644)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "pyproject.toml"), []byte(pyprojectToml), 0644); err != nil {
 		b.Fatalf("Failed to write pyproject.toml: %v", err)
 	}
 
@@ -289,10 +272,7 @@ build-backend = "setuptools.build_meta"
 func createTempGoProject(b *testing.B) string {
 	b.Helper()
 
-	tempDir, err := os.MkdirTemp("", "benchmark-go-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tempDir := b.TempDir()
 
 	goMod := `module github.com/test/benchmark-project
 
@@ -309,8 +289,7 @@ require (
 )
 `
 
-	err = os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0644)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0644); err != nil {
 		b.Fatalf("Failed to write go.mod: %v", err)
 	}
 
@@ -320,10 +299,7 @@ require (
 func createTempRustProject(b *testing.B) string {
 	b.Helper()
 
-	tempDir, err := os.MkdirTemp("", "benchmark-rust-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tempDir := b.TempDir()
 
 	cargoToml := `[package]
 name = "benchmark-test-project"
@@ -338,8 +314,7 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
 `
 
-	err = os.WriteFile(filepath.Join(tempDir, "Cargo.toml"), []byte(cargoToml), 0644)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "Cargo.toml"), []byte(cargoToml), 0644); err != nil {
 		b.Fatalf("Failed to write Cargo.toml: %v", err)
 	}
 
@@ -349,10 +324,7 @@ tokio = { version = "1.0", features = ["full"] }
 func createLargeTestProject(b *testing.B) string {
 	b.Helper()
 
-	tempDir, err := os.MkdirTemp("", "benchmark-large-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tempDir := b.TempDir()
 
 	// Create main package.json
 	packageJSON := `{
@@ -361,23 +333,20 @@ func createLargeTestProject(b *testing.B) string {
 		"description": "Large project with many files"
 	}`
 
-	err = os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(packageJSON), 0644)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(packageJSON), 0644); err != nil {
 		b.Fatalf("Failed to write package.json: %v", err)
 	}
 
 	// Create many additional files to simulate a large project
 	for i := 0; i < 100; i++ {
 		subDir := filepath.Join(tempDir, "src", "components")
-		err = os.MkdirAll(subDir, 0755)
-		if err != nil {
+		if err := os.MkdirAll(subDir, 0755); err != nil {
 			b.Fatalf("Failed to create subdirectory: %v", err)
 		}
 
 		filename := filepath.Join(subDir, fmt.Sprintf("component-%d.js", i))
 		content := fmt.Sprintf("// Component %d\nmodule.exports = {};", i)
-		err = os.WriteFile(filename, []byte(content), 0644)
-		if err != nil {
+		if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
 			b.Fatalf("Failed to write component file: %v", err)
 		}
 	}
@@ -388,17 +357,13 @@ func createLargeTestProject(b *testing.B) string {
 func createDeepDirectoryStructure(b *testing.B) string {
 	b.Helper()
 
-	tempDir, err := os.MkdirTemp("", "benchmark-deep-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp directory: %v", err)
-	}
+	tempDir := b.TempDir()
 
 	// Create a deep directory structure
 	currentDir := tempDir
 	for i := 0; i < 10; i++ {
 		currentDir = filepath.Join(currentDir, fmt.Sprintf("level-%d", i))
-		err = os.MkdirAll(currentDir, 0755)
-		if err != nil {
+		if err := os.MkdirAll(currentDir, 0755); err != nil {
 			b.Fatalf("Failed to create deep directory: %v", err)
 		}
 
@@ -406,8 +371,7 @@ func createDeepDirectoryStructure(b *testing.B) string {
 		for j := 0; j < 5; j++ {
 			filename := filepath.Join(currentDir, fmt.Sprintf("file-%d.txt", j))
 			content := fmt.Sprintf("File %d at level %d", j, i)
-			err = os.WriteFile(filename, []byte(content), 0644)
-			if err != nil {
+			if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
 				b.Fatalf("Failed to write file: %v", err)
 			}
 		}
@@ -415,8 +379,7 @@ func createDeepDirectoryStructure(b *testing.B) string {
 
 	// Add a package.json at the root for actual version extraction
 	packageJSON := `{"name": "deep-project", "version": "1.0.0"}`
-	err = os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(packageJSON), 0644)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(packageJSON), 0644); err != nil {
 		b.Fatalf("Failed to write package.json: %v", err)
 	}
 

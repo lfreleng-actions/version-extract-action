@@ -31,6 +31,26 @@ const (
 // the substitution runs against whole file contents.
 var whitespaceRun = regexp.MustCompile(`\s+`)
 
+// versionValidators holds the version validation patterns above, compiled
+// once in the order isValidVersion tries them. They are constants, so a
+// compile failure is a programming error and MustCompile panics at init.
+var versionValidators = []*regexp.Regexp{
+	regexp.MustCompile(semverPattern),
+	regexp.MustCompile(pythonStylePattern),
+	regexp.MustCompile(simplePattern),
+	regexp.MustCompile(datePattern),
+}
+
+// multiLineIndicators detect user patterns that likely span multiple lines.
+// See isMultiLinePattern for why the last entry is double-escaped.
+var multiLineIndicators = []*regexp.Regexp{
+	regexp.MustCompile(`\.package\(.*version`),  // Swift Package Manager dependencies
+	regexp.MustCompile(`<[^>]*>.*<[^>]*>`),      // XML tags that might span lines
+	regexp.MustCompile(`\([^)]*version[^)]*\)`), // Function calls with version parameters
+	regexp.MustCompile(`\{[^}]*version[^}]*\}`), // JSON-like objects with version
+	regexp.MustCompile(`\[\\s\\S\]`),            // Patterns using [\s\S] for any character including newlines
+}
+
 // extractVersionFromFile attempts to extract version using regex patterns
 func (e *VersionExtractor) extractVersionFromFile(filePath string,
 	patterns []string) (string, string, error) {
@@ -87,16 +107,8 @@ func (e *VersionExtractor) isMultiLinePattern(pattern string) bool {
 	//
 	// NOTE: Do NOT use `\[\s\S\]` (single backslash before s/S) as that would
 	// look for regex escape sequences, not literal backslashes in the string.
-	multiLineIndicators := []string{
-		`\.package\(.*version`,  // Swift Package Manager dependencies
-		`<[^>]*>.*<[^>]*>`,      // XML tags that might span lines
-		`\([^)]*version[^)]*\)`, // Function calls with version parameters
-		`\{[^}]*version[^}]*\}`, // JSON-like objects with version
-		`\[\\s\\S\]`,            // Patterns using [\s\S] for any character including newlines
-	}
-
 	for _, indicator := range multiLineIndicators {
-		if matched, _ := regexp.MatchString(indicator, pattern); matched {
+		if indicator.MatchString(pattern) {
 			return true
 		}
 	}
@@ -210,30 +222,17 @@ func (e *VersionExtractor) cleanVersion(version string) string {
 	return version
 }
 
-// isValidVersion performs basic validation on version strings
+// isValidVersion performs basic validation on version strings: semver, then
+// Python-style (e.g., 3.2.0.dev), simple numeric, and date-based (CalVer).
 func (e *VersionExtractor) isValidVersion(version string) bool {
 	if version == "" {
 		return false
 	}
 
-	// Validate against official semantic version pattern (from semver.org)
-	matched, _ := regexp.MatchString(semverPattern, version)
-	if matched {
-		return true
+	for _, re := range versionValidators {
+		if re.MatchString(version) {
+			return true
+		}
 	}
-
-	// Validate against Python-style versions (e.g., 3.2.0.dev)
-	matched, _ = regexp.MatchString(pythonStylePattern, version)
-	if matched {
-		return true
-	}
-
-	matched, _ = regexp.MatchString(simplePattern, version)
-	if matched {
-		return true
-	}
-
-	// Validate against date-based version pattern (CalVer)
-	matched, _ = regexp.MatchString(datePattern, version)
-	return matched
+	return false
 }

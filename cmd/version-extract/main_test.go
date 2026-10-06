@@ -23,7 +23,7 @@ func TestHandleErrorJSONOutput(t *testing.T) {
 			expectedJSON: true,
 		},
 		{
-			name:         "JSON format with minimized output",
+			name:         "JSON format with minimised output",
 			outputFormat: "json",
 			jsonFormat:   "minimised",
 			expectedJSON: true,
@@ -40,37 +40,44 @@ func TestHandleErrorJSONOutput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set global variables to simulate command line flags
 			originalOutputFormat := outputFormat
-			originalJsonFormat := jsonFormat
+			originalJSONFormat := jsonFormat
 
 			outputFormat = tt.outputFormat
 			jsonFormat = tt.jsonFormat
 
 			// Capture stdout
 			originalStdout := os.Stdout
-			r, w, _ := os.Pipe()
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("Failed to create stdout pipe: %v", err)
+			}
 			os.Stdout = w
 
 			// Capture stderr
 			originalStderr := os.Stderr
-			rErr, wErr, _ := os.Pipe()
+			rErr, wErr, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("Failed to create stderr pipe: %v", err)
+			}
 			os.Stderr = wErr
 
 			// Test handleError function
-			err := handleError(testError("test error message"))
+			err = handleError(testError("test error message"))
 
 			// Close writers and restore
-			w.Close()
-			wErr.Close()
+			_ = w.Close()    //nolint:errcheck // test pipe, read below
+			_ = wErr.Close() //nolint:errcheck // test pipe, read below
 			os.Stdout = originalStdout
 			os.Stderr = originalStderr
 
-			// Read captured output
+			// Read captured output; an empty or short read fails the
+			// assertions below, so the read error adds nothing.
 			stdoutData := make([]byte, 1024)
-			n, _ := r.Read(stdoutData)
+			n, _ := r.Read(stdoutData) //nolint:errcheck // checked via content
 			stdoutOutput := string(stdoutData[:n])
 
 			stderrData := make([]byte, 1024)
-			nErr, _ := rErr.Read(stderrData)
+			nErr, _ := rErr.Read(stderrData) //nolint:errcheck // checked via content
 			stderrOutput := string(stderrData[:nErr])
 
 			// Verify that handleError returns the original error
@@ -105,7 +112,7 @@ func TestHandleErrorJSONOutput(t *testing.T) {
 
 			// Restore original values
 			outputFormat = originalOutputFormat
-			jsonFormat = originalJsonFormat
+			jsonFormat = originalJSONFormat
 		})
 	}
 }
