@@ -3,7 +3,7 @@
 
 module github.com/lfreleng-actions/version-extract-action
 
-go 1.24
+go 1.26.0
 
 require (
 	github.com/spf13/cobra v1.9.1
