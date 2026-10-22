@@ -123,7 +123,7 @@ generate_go_project() {
     cat > "$project_dir/go.mod" << 'EOF'
 module github.com/test/project
 
-go 1.24
+go 1.26
 
 require (
     github.com/spf13/cobra v1.8.0
