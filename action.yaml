@@ -150,50 +150,44 @@ runs:
 
         echo "Running: ./version-extract ${ARGS[*]}"
 
-        # Run the extractor and capture output correctly
-        # The Go app sends verbose output to stderr and JSON to stdout
-        # when format=json
+        # Run the extractor once. With --format=json it writes the JSON
+        # result to stdout and every diagnostic to stderr, so keep the
+        # streams apart: stdout is parsed, stderr is kept for the log.
+        STDERR_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/version-extract.XXXXXX")
+        trap 'rm -f "${STDERR_FILE}"' EXIT
+
         set +e  # Don't exit on command failure
-        if [ "${VERBOSE}" = "true" ]; then
-          # Verbose mode: show stderr, capture stdout for JSON parsing
-          OUTPUT=$(./version-extract "${ARGS[@]}" 2>&1)
-          EXTRACTOR_EXIT_CODE=$?
-          echo "${OUTPUT}"
-          # Extract JSON from the output (from first { to last })
-          JSON_LINE=$(echo "${OUTPUT}" | sed -n '/^{/,/^}/p')
-        else
-          # Non-verbose mode: suppress stderr, capture stdout
-          OUTPUT=$(./version-extract "${ARGS[@]}" 2>/dev/null)
-          EXTRACTOR_EXIT_CODE=$?
-          JSON_LINE="${OUTPUT}"
-        fi
+        OUTPUT=$(./version-extract "${ARGS[@]}" 2>"${STDERR_FILE}")
+        EXTRACTOR_EXIT_CODE=$?
         set -e  # Re-enable exit on error
 
+        if [ "${VERBOSE}" = "true" ]; then
+          cat "${STDERR_FILE}"
+        fi
+
         # Check if extraction was successful
-        if [ ${EXTRACTOR_EXIT_CODE} -eq 0 ] && [ -n "${JSON_LINE}" ]; then
+        if [ ${EXTRACTOR_EXIT_CODE} -eq 0 ] && [ -n "${OUTPUT}" ]; then
           echo "Extractor succeeded"
-          if [ "${VERBOSE}" != "true" ]; then
-            echo "${OUTPUT}"
-          fi
+          echo "${OUTPUT}"
 
           # Parse JSON output to extract all values
-          VERSION=$(echo "${JSON_LINE}" | jq -r '.version // ""' \
+          VERSION=$(echo "${OUTPUT}" | jq -r '.version // ""' \
             2>/dev/null || echo "")
-          PROJECT_TYPE=$(echo "${JSON_LINE}" | jq -r '.project_type // ""' \
+          PROJECT_TYPE=$(echo "${OUTPUT}" | jq -r '.project_type // ""' \
             2>/dev/null || echo "")
-          SUBTYPE=$(echo "${JSON_LINE}" | jq -r '.subtype // ""' \
+          SUBTYPE=$(echo "${OUTPUT}" | jq -r '.subtype // ""' \
             2>/dev/null || echo "")
-          FILE_PATH=$(echo "${JSON_LINE}" | jq -r '.file // ""' \
+          FILE_PATH=$(echo "${OUTPUT}" | jq -r '.file // ""' \
             2>/dev/null || echo "")
-          SUCCESS=$(echo "${JSON_LINE}" | jq -r '.success // false' \
+          SUCCESS=$(echo "${OUTPUT}" | jq -r '.success // false' \
             2>/dev/null || echo "false")
-          MATCHED_BY=$(echo "${JSON_LINE}" | jq -r '.matched_by // ""' \
+          MATCHED_BY=$(echo "${OUTPUT}" | jq -r '.matched_by // ""' \
             2>/dev/null || echo "")
-          VERSION_SOURCE=$(echo "${JSON_LINE}" | jq -r '.version_source // ""' \
+          VERSION_SOURCE=$(echo "${OUTPUT}" | jq -r '.version_source // ""' \
             2>/dev/null || echo "")
-          GIT_TAG=$(echo "${JSON_LINE}" | jq -r '.git_tag // ""' \
+          GIT_TAG=$(echo "${OUTPUT}" | jq -r '.git_tag // ""' \
             2>/dev/null || echo "")
-          ERROR_MSG=$(echo "${JSON_LINE}" | jq -r '.error // ""' \
+          ERROR_MSG=$(echo "${OUTPUT}" | jq -r '.error // ""' \
             2>/dev/null || echo "")
 
           # Set all outputs
@@ -237,13 +231,16 @@ runs:
           fi
 
         else
-          # Extraction failed - capture full error output
+          # Extraction failed - report the stderr captured above, falling
+          # back to stdout when the extractor wrote nothing to stderr
+          ERROR_OUTPUT=$(cat "${STDERR_FILE}")
+          if [ -z "${ERROR_OUTPUT}" ]; then
+            ERROR_OUTPUT="${OUTPUT}"
+          fi
           if [ "${VERBOSE}" != "true" ]; then
-            ERROR_OUTPUT=$(./version-extract "${ARGS[@]}" 2>&1 || true)
             echo "Extractor failed with output:"
             echo "${ERROR_OUTPUT}"
           else
-            ERROR_OUTPUT="${OUTPUT}"
             echo "Extractor failed"
           fi
 
@@ -263,9 +260,9 @@ runs:
             "${GITHUB_STEP_SUMMARY}"
           echo "❌ **Failed**: Version extraction failed" >> \
             "${GITHUB_STEP_SUMMARY}"
-          echo "```" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
           echo "${ERROR_OUTPUT}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "```" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
 
           if [ "${FAIL_ON_ERROR}" = "true" ]; then
             echo "::error::Version extraction failed: ${ERROR_OUTPUT}"

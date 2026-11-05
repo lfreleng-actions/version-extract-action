@@ -126,6 +126,13 @@ jobs:
           ./version-extract --help > /dev/null
           echo '✅ Help command works'
 
+      # Runs the action's extract step against a stub extractor that
+      # writes diagnostics to stderr around its JSON result
+      - name: 'Action Step Tests'
+        run: |
+          # Action Step Tests
+          bash test/action-step-test.sh action.yaml
+
       # Phase 5: Sample Project Tests (replaces matrix strategy)
       - name: 'Generate Test Samples'
         run: |
@@ -263,6 +270,14 @@ jobs:
           config: config-sample/patterns.yaml
           format: json
 
+      - name: 'Test Action - Verbose minimised JSON'
+        id: test-minimised
+        uses: $/
+        with:
+          path: test-samples/javascript
+          verbose: true
+          json_format: minimised
+
       - name: 'Validate Action Results'
         run: |
           # Validate Action Results
@@ -296,6 +311,14 @@ jobs:
             exit 1
           fi
 
+          if [[ "${STEPS_TEST_MINIMISED_OUTPUTS_SUCCESS}" != "true" ]] || \
+            [[ "${STEPS_TEST_MINIMISED_OUTPUTS_VERSION}" != "1.2.3" ]]; then
+            echo "❌ Verbose minimised JSON test failed: got" \
+              "success=${STEPS_TEST_MINIMISED_OUTPUTS_SUCCESS}" \
+              "version=${STEPS_TEST_MINIMISED_OUTPUTS_VERSION}"
+            exit 1
+          fi
+
           echo '✅ Action tests passed'
         env:
           STEPS_TEST_JS_OUTPUTS_SUCCESS: ${{ steps.test-js.outputs.success }}
@@ -306,6 +329,10 @@ jobs:
           STEPS_TEST_CONFIG_OUTPUTS_PROJECT_TYPE: ${{ steps.test-config.outputs.project-type }}
           # yamllint disable-line rule:line-length
           STEPS_TEST_CONFIG_OUTPUTS_VERSION: ${{ steps.test-config.outputs.version }}
+          # yamllint disable-line rule:line-length
+          STEPS_TEST_MINIMISED_OUTPUTS_SUCCESS: ${{ steps.test-minimised.outputs.success }}
+          # yamllint disable-line rule:line-length
+          STEPS_TEST_MINIMISED_OUTPUTS_VERSION: ${{ steps.test-minimised.outputs.version }}
 
       # Phase 7: Error Handling Tests
       - name: 'Error Handling Tests'
