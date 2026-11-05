@@ -263,9 +263,9 @@ runs:
             "${GITHUB_STEP_SUMMARY}"
           echo "❌ **Failed**: Version extraction failed" >> \
             "${GITHUB_STEP_SUMMARY}"
-          echo "```" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
           echo "${ERROR_OUTPUT}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "```" >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
 
           if [ "${FAIL_ON_ERROR}" = "true" ]; then
             echo "::error::Version extraction failed: ${ERROR_OUTPUT}"
